@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+def ks = new Properties()
+def ksFile = file('keystore.properties')
+if (ksFile.exists()) ksFile.withInputStream { ks.load(it) }
+
+android {
+    namespace 'com.ledgerbook.billing'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.ledgerbook.billing'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        release {
+            storeFile file(ks.getProperty('storeFile', 'ledgerbook-release.jks'))
+            storePassword ks.getProperty('storePassword')
+            keyAlias ks.getProperty('keyAlias')
+            keyPassword ks.getProperty('keyPassword')
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signed with the shop's key when keystore.properties is present (locally, or restored
+            // from GitHub Secrets). Otherwise Gradle outputs app-release-unsigned.apk to sign later.
+            if (ksFile.exists()) signingConfig signingConfigs.release
+        }
+    }
+
+    lint {
+        // Sideloaded APK: don't fail the build on Play Store-only checks
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

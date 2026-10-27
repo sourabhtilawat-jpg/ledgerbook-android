@@ -1,0 +1,10 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+out/
+# Signing key: never commit. Stored in GitHub Secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD).
+app/ledgerbook-release.jks
+app/keystore.properties
