@@ -70,3 +70,42 @@ The same workflow builds `Ledgerbook-Setup-<version>.exe` on a Windows machine a
 protected your PC". Click **More info → Run anyway**. Data is kept on that PC (back up from Settings).
 Invoices are saved to *Downloads\\Ledgerbook*. *Send on WhatsApp* opens the customer's chat with the
 message typed and opens the folder holding the PDF, so you can drag the PDF into the chat.
+
+## Several people at once: Ledgerbook Server (v1.4)
+
+All devices of one business (for example the shopkeeper's Android tablet and the accountant's PC)
+connect to **one Ledgerbook Server**. Everyone signs in with their own username and password, sees
+changes live, and every change goes into the audit trail.
+
+### Option 1: on the shop network (no internet needed)
+1. Install the Windows app on the shop PC. Open **Settings → Multi-user & network → Host the server
+   on this computer → Start server**. Tick *Start automatically with the app*.
+2. Click **Create the admin account** and choose the admin's username and password.
+3. Settings shows addresses like `http://192.168.1.10:8787`. On the Android tablet, open
+   **Settings → Connect to a server**, enter that address and sign in. Any other computer can
+   simply open that address in Chrome/Edge, no install needed.
+4. If Windows asks about the firewall, allow access on **private** networks.
+The server's data lives in *Documents\\Ledgerbook Server* on that PC. Back that folder up.
+
+### Option 2: in the cloud (work from anywhere)
+The repository includes a `Dockerfile` and `render.yaml`.
+- **Render.com:** New → Blueprint → choose this repository. It creates the service with a
+  persistent disk (the Starter plan is needed for the disk). You get an address like
+  `https://ledgerbook-server.onrender.com`.
+- **Any VPS (DigitalOcean, AWS Lightsail, Hostinger…):**
+  `docker build -t ledgerbook . && docker run -d -p 8787:8787 -v ledgerbook-data:/data --restart unless-stopped ledgerbook`
+  and put HTTPS in front of it (for example Caddy or Nginx with Let's Encrypt).
+- Without Docker: install Node.js 18+, then run `node server/server.js` (data goes to `./ledgerbook-data`).
+Then open the address in a browser, create the admin account, and connect the apps to it.
+Always use **https://** for a cloud server.
+
+### Users, rights and audit trail
+- The admin adds users under **Users & rights**. Pick a role (Admin, Accountant, Cashier /
+  Salesperson, Store manager, Viewer), then tick or untick individual rights. The server checks
+  every change against the user's rights.
+- **Audit trail** records every create, edit, cancel, delete, sign-in, failed sign-in and blocked
+  attempt, with user, time, device, IP and old → new values. Each entry is hash-chained to the
+  previous one; the screen shows whether the chain is intact. Entries can't be edited or deleted.
+- Two people editing the same record: the second save is refused with a message and the record
+  refreshes, so nobody overwrites someone else's work. Invoice numbers come from the server, so two
+  counters billing at once never get the same number.

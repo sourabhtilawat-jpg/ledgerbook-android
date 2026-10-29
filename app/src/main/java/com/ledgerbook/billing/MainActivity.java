@@ -45,6 +45,8 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(false);
         s.setTextZoom(100);
         s.setSupportZoom(false);
+        // Lets the app talk to a Ledgerbook Server on the shop network (http://192.168.x.x:8787)
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         web.addJavascriptInterface(new NativeBridge(this, web), "LBNative");
 

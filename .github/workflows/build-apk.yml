@@ -89,6 +89,7 @@ jobs:
         working-directory: desktop
         run: |
           rm -rf www && cp -r ../app/src/main/assets/www www
+          cp ../server/server.js server.js
           npm install --no-audit --no-fund
           npx electron-builder --win nsis --x64 --publish never
           ls -la dist

@@ -1,0 +1,14 @@
+# One-click cloud deploy on Render (render.com): New → Blueprint → pick this repository.
+services:
+  - type: web
+    name: ledgerbook-server
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    disk:
+      name: ledgerbook-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: LEDGERBOOK_DATA
+        value: /data

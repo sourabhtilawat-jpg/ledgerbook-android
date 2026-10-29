@@ -9,4 +9,8 @@ contextBridge.exposeInMainWorld("LBNative", {
   openUrl: (url) => ipcRenderer.sendSync("lb:openUrl", url),
   appVersion: () => ipcRenderer.sendSync("lb:version"),
   waCloudSendAsync: (json) => ipcRenderer.invoke("lb:waCloud", json),
+  serverStart: () => ipcRenderer.invoke("lb:serverStart"),
+  serverStop: () => ipcRenderer.invoke("lb:serverStop"),
+  serverInfo: () => ipcRenderer.invoke("lb:serverInfo"),
+  serverAuto: (on) => ipcRenderer.invoke("lb:serverAuto", on),
 });

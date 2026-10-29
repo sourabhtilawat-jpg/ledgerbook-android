@@ -8,6 +8,23 @@ const os = require("os");
 const GRAPH = "https://graph.facebook.com/v23.0/";
 let win;
 
+/* ---------- Ledgerbook Server hosted by this PC (LAN mode) ---------- */
+const { createLedgerbookServer } = require("./server.js");
+let lbServer = null;
+const cfgPath = () => path.join(app.getPath("userData"), "config.json");
+const readCfg = () => { try { return JSON.parse(fs.readFileSync(cfgPath(), "utf8")); } catch (e) { return {}; } };
+const writeCfg = (c) => { try { fs.writeFileSync(cfgPath(), JSON.stringify(Object.assign(readCfg(), c), null, 1)); } catch (e) { /* ignore */ } };
+function getServer() {
+  if (!lbServer) lbServer = createLedgerbookServer({ dataDir: path.join(app.getPath("documents"), "Ledgerbook Server"), wwwDir: path.join(__dirname, "www"), port: readCfg().port || 8787 });
+  return lbServer;
+}
+const serverInfo = () => Object.assign(lbServer ? lbServer.info() : { running: false, port: readCfg().port || 8787, urls: [], local: `http://localhost:${readCfg().port || 8787}`, dataDir: path.join(app.getPath("documents"), "Ledgerbook Server"), users: 0 }, { autoStart: !!readCfg().autoStart });
+ipcMain.handle("lb:serverStart", async () => { await getServer().start(); return serverInfo(); });
+ipcMain.handle("lb:serverStop", async () => { if (lbServer) await lbServer.stop(); return serverInfo(); });
+ipcMain.handle("lb:serverInfo", async () => serverInfo());
+ipcMain.handle("lb:serverAuto", async (e, on) => { writeCfg({ autoStart: !!on }); return serverInfo(); });
+app.on("before-quit", () => { try { lbServer && lbServer.snapshot(); } catch (e) { /* ignore */ } });
+
 if (!app.requestSingleInstanceLock()) app.quit();
 
 const downloadsDir = () => {
@@ -49,7 +66,10 @@ function createWindow() {
 }
 
 app.on("second-instance", () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  if (readCfg().autoStart) { try { await getServer().start(); } catch (e) { /* port busy: user can start it from Settings */ } }
+  createWindow();
+});
 app.on("window-all-closed", () => app.quit());
 
 ipcMain.on("lb:saveFile", (e, b64, name) => {

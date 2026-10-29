@@ -174,6 +174,10 @@ legend{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 .confirm{background:var(--bad-soft);border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
 .err{color:var(--bad);font-size:13px;margin-top:8px}
 .hint{font-size:12px;color:var(--muted)}
+/* sign-in gate */
+#gate{position:fixed;inset:0;z-index:90;background:radial-gradient(900px 700px at 30% 20%,var(--brand-2),var(--brand) 60%,#06302B);display:grid;place-items:center;padding:24px max(16px, env(safe-area-inset-right,0px)) 24px max(16px, env(safe-area-inset-left,0px));overflow:auto}
+.gate-card{width:100%;max-width:420px;background:var(--surface);border-radius:18px;padding:28px;box-shadow:0 30px 80px rgba(0,0,0,.35)}
+.gate-card .brand i{background:var(--saffron)}
 /* payment */
 .paybig{text-align:center;padding:4px 0 14px}
 .paybig .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600}
@@ -237,7 +241,7 @@ const STATE_NAME=Object.fromEntries(STATES);
 const GST_RATES=[0,0.25,3,5,12,18,28,40];
 const UNITS=["PCS","NOS","BOX","BAG","KGS","GMS","LTR","MTR","SET","PAC","DOZ","BTL","ROL","SQM"];
 const COLLS=["items","customers","vendors","purchases","sales","tds","ledgers","vouchers"];
-const APP_VERSION="1.3";
+const APP_VERSION="1.4";
 const DEVELOPER="Sourabh Tilawat";
 /* TDS on resident payments under section 393(1), Income-tax Act 2025 (from 1 Apr 2026). Old 1961-Act section shown for familiarity.
    Rates per published FY 2026-27 rate charts; payment codes are left for the user because published code lists differ. */
@@ -269,6 +273,9 @@ const ICON={
   reports:'<path d="M3 21h18M6 17v-6M11 17V5M16 17v-9M21 17v-3"/>',
   settings:'<path d="M4 6.5h9M18 6.5h2M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15.5" cy="6.5" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="17" cy="17.5" r="2.2"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
+  audit:'<path d="M12 2.5 4 5.5v6c0 4.6 3.3 8.6 8 10 4.7-1.4 8-5.4 8-10v-6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>',
+  users:'<circle cx="9" cy="8" r="3.4"/><path d="M2.6 20c.8-3.6 3.3-5.6 6.4-5.6 1.6 0 3 .5 4.1 1.5"/><circle cx="17.5" cy="15.5" r="2.3"/><path d="M17.5 17.8V21M16 19.6h3"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4.2 4.2-6.5 8-6.5s7 2.3 8 6.5"/>',
   accounts:'<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16.5H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 21a2.5 2.5 0 0 1 2.5-2.5H20V22H6.5A2.5 2.5 0 0 1 4 19.5M8.5 6.5h7M8.5 10h5"/>',
   qr:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20.5h3M20 17.5v3.5"/>',
   cash:'<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v.01M18 14.5v.01"/>',
@@ -279,10 +286,11 @@ const ICON={
   rupee:'<path d="M7 4.5h10M7 9h10M7 4.5h3.5a4.5 4.5 0 0 1 0 9H7l8 6.5"/>',
 };
 const ic=n=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||""}</svg>`;
-const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["accounts","Accounts"],["settings","Settings"]];
+const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["accounts","Accounts"],["sep"],["audit","Audit trail"],["users","Users & rights"],["settings","Settings"]];
 
 /* ---------- state ---------- */
-const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],ledgers:[],vouchers:[],settings:{},counters:{}};
+const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],ledgers:[],vouchers:[],audit:[],settings:{},counters:{}};
+let READY=false;
 let view="dashboard", sub={}, backend=null, renderQueued=false;
 const TAB=Math.random().toString(36).slice(2);
 
@@ -355,7 +363,7 @@ function words(n){
 }
 
 /* ---------- storage backends ---------- */
-function scheduleRender(){if(renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;renderShell();renderView()})}
+function scheduleRender(){if(!READY||renderQueued)return;renderQueued=true;requestAnimationFrame(()=>{renderQueued=false;renderShell();renderView()})}
 
 /* Device storage: IndexedDB (one record per document, no 5 MB limit), localStorage as fallback. */
 function idbOpen(){return new Promise((res,rej)=>{let r;try{r=indexedDB.open("ledgerbook",1)}catch(e){return rej(e)}r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
@@ -368,7 +376,7 @@ async function localBackend(){
   const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
   if(idb){
     const all=await new Promise((res,rej)=>{const out=[];const t=idb.transaction("kv","readonly");const c=t.objectStore("kv").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push([cur.key,cur.value]);cur.continue()}else res(out)};c.onerror=()=>rej(c.error)});
-    for(const [k,v] of all){const [coll]=String(k).split("/");if(COLLS.includes(coll))S[coll].push(v);else if(k==="settings")S.settings=v;else if(k==="counters")S.counters=v}
+    for(const [k,v] of all){const [coll]=String(k).split("/");if(COLLS.includes(coll))S[coll].push(v);else if(coll==="audit")S.audit.push(v);else if(k==="settings")S.settings=v;else if(k==="counters")S.counters=v}
     // one-time move of data saved by the earlier browser-only version
     try{const raw=localStorage.getItem(OLD);if(raw&&!all.length){const d=JSON.parse(raw);for(const c of COLLS)for(const o of d[c]||[]){S[c].push(o);await idbPut(c+"/"+o.id,o)}if(d.settings){S.settings=d.settings;await idbPut("settings",d.settings)}if(d.counters){S.counters=d.counters;await idbPut("counters",d.counters)}localStorage.removeItem(OLD)}}catch(e){}
     try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
@@ -376,11 +384,13 @@ async function localBackend(){
     try{const raw=localStorage.getItem(OLD);if(raw){const d=JSON.parse(raw);for(const k of [...COLLS,"settings","counters"])if(d[k])S[k]=d[k]}}catch(e){}
   }
   const save=async(k,v)=>{if(idb){try{await idbPut(k,v)}catch(e){toast("Could not save on this device: storage is full");throw e}}else persistLS()};
+  const logA=async(action,coll,before,after,noDocs)=>{const e={id:uid(),ts:new Date().toISOString(),user:{username:"owner",name:"This device"},device:DEVICE_NAME,action,coll,docId:(after||before)?.id,label:coll==="settings"?"Business settings":auditLabel(coll,after||before),changes:auditDiff(before,after)};if(!noDocs){e.before=before||undefined;e.after=after||undefined}S.audit.push(e);if(idb){try{await idbPut("audit/"+e.id,e)}catch(x){}}};
   return {
     kind:"local",
-    async put(coll,obj){obj=JSON.parse(JSON.stringify(obj));const i=S[coll].findIndex(x=>x.id===obj.id);if(i>=0)S[coll][i]=obj;else S[coll].push(obj);await save(coll+"/"+obj.id,obj);scheduleRender()},
-    async remove(coll,id){S[coll]=S[coll].filter(x=>x.id!==id);if(idb)await idbDel(coll+"/"+id);else persistLS();scheduleRender()},
-    async saveSettings(o){S.settings=o;await save("settings",o);scheduleRender()},
+    async put(coll,obj){obj=JSON.parse(JSON.stringify(obj));const i=S[coll].findIndex(x=>x.id===obj.id),before=i>=0?S[coll][i]:null;if(i>=0)S[coll][i]=obj;else S[coll].push(obj);await save(coll+"/"+obj.id,obj);
+      await logA(!before?"create":coll==="sales"&&before.status!=="cancelled"&&obj.status==="cancelled"?"cancel":"update",coll,before,obj);scheduleRender()},
+    async remove(coll,id){const before=S[coll].find(x=>x.id===id);S[coll]=S[coll].filter(x=>x.id!==id);if(idb)await idbDel(coll+"/"+id);else persistLS();if(before)await logA("delete",coll,before,null);scheduleRender()},
+    async saveSettings(o){const before=S.settings;S.settings=o;await save("settings",o);await logA("update","settings",before,o,true);scheduleRender()},
     async nextSeq(fy,floor){const n=Math.max(num(S.counters[fy]),floor)+1;S.counters={...S.counters,[fy]:n};await save("counters",S.counters);return n},
     async resetCounters(map){S.counters=map;await save("counters",map)},
   };
@@ -538,20 +548,22 @@ const csv=rows=>"﻿"+rows.map(r=>r.map(v=>{v=v==null?"":String(v);return /[",\n
 function renderShell(){
   const B=S.settings,t=todayISO();
   $("#bizName").textContent=B.name||"Set your business name in Settings";
-  $("#nav").innerHTML=VIEWS.map(v=>v[0]==="sep"?`<div class="sep"></div>`:`<button data-v="${v[0]}"${v[0]===view?' aria-current="page"':""}>${ic(v[0])}<span class="lbl">${v[1]}</span>${v[2]?`<kbd>${v[2]}</kbd>`:""}</button>`).join("");
+  $("#nav").innerHTML=VIEWS.filter(v=>v[0]==="sep"||viewAllowed(v[0])).map(v=>v[0]==="sep"?`<div class="sep"></div>`:`<button data-v="${v[0]}"${v[0]===view?' aria-current="page"':""}>${ic(v[0])}<span class="lbl">${v[1]}</span>${v[2]?`<kbd>${v[2]}</kbd>`:""}</button>`).join("");
   $("#topbar").innerHTML=`<div class="who"><b>${esc(B.name||"Ledgerbook")}</b><span>${new Date().toLocaleDateString("en-IN",{weekday:"short",day:"numeric",month:"short",year:"numeric"})} · FY ${fyOf(t)}${B.gstin?" · GSTIN "+esc(B.gstin):""}</span></div>
-   <button class="btn" data-act="newPurchase" title="New purchase (P)">${ic("purchases")}<span class="t">Purchase</span></button>
-   <button class="btn cta" data-act="newSale" title="New sales invoice (S)">${ic("plus")}<span class="t">New invoice</span></button>`;
+   ${can("purchases.edit")?`<button class="btn" data-act="newPurchase" title="New purchase (P)">${ic("purchases")}<span class="t">Purchase</span></button>`:""}
+   ${can("sales.create")?`<button class="btn cta" data-act="newSale" title="New sales invoice (S)">${ic("plus")}<span class="t">New invoice</span></button>`:""}
+   ${SRV&&ME?`<button class="btn" data-act="userMenu" title="Signed in as ${esc(ME.username)}">${ic("user")}<span class="t">${esc(ME.name.split(" ")[0])}</span></button>`:""}`;
 }
-$("#topbar").addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;if(b.dataset.act==="newSale")openSaleForm();if(b.dataset.act==="newPurchase")openPurchaseForm()});
+$("#topbar").addEventListener("click",e=>{const b=e.target.closest("[data-act]");if(!b)return;if(b.dataset.act==="newSale")openSaleForm();if(b.dataset.act==="newPurchase")openPurchaseForm();
+  if(b.dataset.act==="userMenu")openModal(`${ME.name}`,`<p style="margin-top:0">Signed in as <b class="mono">${esc(ME.username)}</b> · ${esc(ROLES_DEF[ME.role]?.name||ME.role)}<br><span class="hint">Server: ${esc(normUrl(SRV.url))}</span></p>`,`<button class="btn" id="um_pw">Change password</button><button class="btn danger" id="um_out">Sign out</button>`,{narrow:true}),$("#um_pw")&&($("#um_pw").onclick=()=>{closeModal();openPasswordForm()}),$("#um_out")&&($("#um_out").onclick=signOut)});
 $("#nav").addEventListener("click",e=>{const b=e.target.closest("button[data-v]");if(b)go(b.dataset.v)});
 function go(v,s){view=v;sub=s||{};try{history.replaceState(null,"","#"+v)}catch(e){}renderShell();renderView();window.scrollTo(0,0)}
-document.addEventListener("keydown",e=>{if($("#modalRoot").firstChild){if(e.key==="Escape")closeModal();return}if(/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName))return;if(e.metaKey||e.ctrlKey||e.altKey)return;if(e.key==="s"||e.key==="S"){e.preventDefault();openSaleForm()}if(e.key==="p"||e.key==="P"){e.preventDefault();openPurchaseForm()}});
+document.addEventListener("keydown",e=>{if($("#modalRoot").firstChild){if(e.key==="Escape")closeModal();return}if(/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName))return;if(e.metaKey||e.ctrlKey||e.altKey)return;if((e.key==="s"||e.key==="S")&&can("sales.create")){e.preventDefault();openSaleForm()}if((e.key==="p"||e.key==="P")&&can("purchases.edit")){e.preventDefault();openPurchaseForm()}});
 
 function renderView(){
   const m=$("#main");
-  const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,accounts:vAccounts,settings:vSettings}[view]||vDash;
-  m.innerHTML=(backend?.kind==="local"&&!NATIVE?`<div class="banner">Your data is saved in this browser only. Use Settings → Backup to keep a copy.</div>`:"")+fn();
+  const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,accounts:vAccounts,audit:vAudit,users:vUsers,settings:vSettings}[viewAllowed(view)?view:(view="dashboard")]||vDash;
+  m.innerHTML=(SRV?`<div class="banner" id="connBanner"${CONN_OK?" hidden":""}>Lost connection to the server. Changes can't be saved until it's back; Ledgerbook keeps trying.</div>`:"")+(backend?.kind==="local"&&!NATIVE?`<div class="banner">Your data is saved in this browser only. Use Settings → Backup to keep a copy, or connect to a Ledgerbook Server.</div>`:"")+fn();
   bindView();
 }
 
@@ -561,6 +573,7 @@ function openModal(title,body,foot,{wide,narrow,noFocus}={}){
   $("#ov").addEventListener("mousedown",e=>{if(e.target.id==="ov")closeModal()});
   $("#ov").querySelectorAll("[data-close]").forEach(b=>b.addEventListener("click",closeModal));
   if(!noFocus){const f=$("#ov").querySelector("input,select,textarea");if(f)setTimeout(()=>f.focus(),30)}
+  applyRights($("#ov"));
 }
 function closeModal(){$("#modalRoot").innerHTML=""}
 
@@ -643,7 +656,7 @@ function openItemForm(id){
 }
 
 function confirmIn(sel,msg,fn){$(sel).innerHTML=`<div class="confirm"><span>${esc(msg)}</span><button class="btn sm danger" id="cYes">Yes, continue</button><button class="btn sm" id="cNo">Keep it</button></div>`;$("#cYes").onclick=fn;$("#cNo").onclick=()=>$(sel).innerHTML=""}
-async function guard(fn){try{await fn()}catch(e){toast(e?.code==="quota_exceeded"?"Storage is full. Delete old records to continue.":"Could not save: "+(e?.message||"try again"));throw e}}
+async function guard(fn){try{return await fn()}catch(e){toast(e?.code==="quota_exceeded"?"Storage is full. Delete old records to continue.":e?.code==="conflict"?"Someone else just changed this record. It has been refreshed; please make your change again.":e?.code==="forbidden"?"You don't have permission to do this. Ask your admin.":e?.code==="network"?"Can't reach the server, so this wasn't saved. Check the connection and try again.":"Could not save: "+(e?.message||"try again"));throw e}}
 
 /* ---------- Inventory ---------- */
 function vInventory(){
@@ -767,6 +780,7 @@ function vSales(){
 
 let lastSaleMode=(()=>{try{return localStorage.getItem("lb_saleMode")||"b2c"}catch(e){return "b2c"}})();
 function openSaleForm(preset){
+  if(!can("sales.create"))return deny();
   if(!S.items.length){toast("Add an item first in Items & HSN");go("items");return}
   const home=S.settings.state||"";
   const st={mode:preset?.mode||lastSaleMode,partyId:preset?.partyId||"",date:todayISO(),pos:home,lines:[{qty:0,rate:0,disc:0,gst:18}]};
@@ -995,6 +1009,7 @@ function vPurchases(){
 }
 
 function openPurchaseForm(editId){
+  if(!editId&&!can("purchases.edit"))return deny();
   if(!S.items.length){toast("Add an item first in Items & HSN");go("items");return}
   const ex=editId?byId("purchases",editId):null;
   const exTds=ex?S.tds.find(x=>x.purchaseId===ex.id):null;
@@ -1716,6 +1731,231 @@ async function exportAllLedgers(){
 
 const isoLocal=ts=>{const d=new Date(ts);return isNaN(d)?"":new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)};
 
+/* ================= MULTI-USER: Ledgerbook Server, sign-in, rights, users, audit trail ================= */
+const SRV_KEY="lb_server";
+let SRV=null,ME=null,RIGHTS_DEF=[],ROLES_DEF={},CONN_OK=true;
+const can=r=>!SRV||!!(ME&&ME.active!==false&&(ME.role==="admin"||(ME.rights||[]).includes(r)));
+function srvCfg(){try{return JSON.parse(localStorage.getItem(SRV_KEY)||"null")}catch(e){return null}}
+function srvSave(c){try{c?localStorage.setItem(SRV_KEY,JSON.stringify(c)):localStorage.removeItem(SRV_KEY)}catch(e){}}
+const DEVICE_NAME=DESKTOP?"Windows app":NATIVE?"Android app":"Web browser";
+const normUrl=u=>{u=String(u||"").trim().replace(/\/+$/,"");if(!u)return "";if(!/^https?:\/\//i.test(u))u="http://"+u;try{const x=new URL(u);if(x.protocol==="http:"&&!x.port&&(/^\d+\.\d+\.\d+\.\d+$/.test(x.hostname)||x.hostname==="localhost"))x.port="8787";return x.origin}catch(e){return u}};
+async function api(path,{method="GET",body,url,token}={}){
+  const base=normUrl(url||SRV.url),headers={"X-LB-Device":DEVICE_NAME},tk=token!==undefined?token:SRV&&SRV.token;
+  if(body!==undefined)headers["Content-Type"]="application/json";if(tk)headers.Authorization="Bearer "+tk;
+  let r;try{r=await fetch(base+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined})}catch(e){throw Object.assign(new Error("Can't reach the server. Check the address, the Wi-Fi/internet connection, and that the server is running."),{code:"network"})}
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok){const err=Object.assign(new Error(j.error||("Server error "+r.status)),{status:r.status,code:r.status===409?"conflict":r.status===403?"forbidden":r.status===401?"auth":"server",current:j.current});if(r.status===401&&!url&&SRV&&SRV.token)onAuthLost();throw err}
+  return j;
+}
+function serverBackend(){
+  const upd=(coll,doc)=>{const i=S[coll].findIndex(x=>x.id===doc.id);if(i>=0)S[coll][i]=doc;else S[coll].push(doc)};
+  let es=null,alive=false;
+  async function loadAll(){const d=await api("/api/data");for(const c of COLLS)S[c]=d.colls[c]||[];S.settings=d.settings||{};S.counters=d.counters||{}}
+  const connect=()=>{try{es&&es.close()}catch(e){}
+    es=new EventSource(normUrl(SRV.url)+"/api/events?token="+encodeURIComponent(SRV.token));
+    es.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}
+      if(m.type==="hello"){if(!alive){alive=true;if(es._seen)loadAll().then(()=>{setConn(true);scheduleRender()});else{es._seen=true;setConn(true)}}}
+      else if(m.type==="put"){upd(m.coll,m.doc);scheduleRender()}
+      else if(m.type==="del"){S[m.coll]=S[m.coll].filter(x=>x.id!==m.id);scheduleRender()}
+      else if(m.type==="settings"){S.settings=m.doc;scheduleRender()}
+      else if(m.type==="counters"){S.counters=m.counters}
+      else if(m.type==="reload"){loadAll().then(scheduleRender)}
+      else if(m.type==="audit"){if(view==="audit"&&!$("#modalRoot").firstChild){auditCache=null;scheduleRender()}}
+      else if(m.type==="users"){refreshMe()}};
+    es.onerror=()=>{if(alive){alive=false;setConn(false)}};
+  };
+  return {kind:"server",loadAll,
+    async init(){await loadAll();connect()},
+    async put(coll,obj){const ex=S[coll].find(x=>x.id===obj.id);
+      const r=await api(`/api/doc/${coll}/${encodeURIComponent(obj.id)}`,{method:"PUT",body:{doc:obj,baseRev:ex?._rev||0}}).catch(e=>{if(e.code==="conflict"){if(e.current)upd(coll,e.current);else S[coll]=S[coll].filter(x=>x.id!==obj.id);scheduleRender()}throw e});
+      upd(coll,r.doc);scheduleRender();return r.doc},
+    async remove(coll,id){const ex=S[coll].find(x=>x.id===id);await api(`/api/doc/${coll}/${encodeURIComponent(id)}?baseRev=${ex?._rev||0}`,{method:"DELETE"});S[coll]=S[coll].filter(x=>x.id!==id);scheduleRender()},
+    async saveSettings(o){const r=await api("/api/settings",{method:"PUT",body:{doc:o,baseRev:S.settings._rev||0}}).catch(e=>{if(e.code==="conflict"&&e.current){S.settings=e.current;scheduleRender()}throw e});S.settings=r.doc;scheduleRender()},
+    async nextSeq(fy,floor){return (await api("/api/seq",{method:"POST",body:{fy,floor}})).n},
+    async resetCounters(map){await api("/api/counters",{method:"POST",body:{map}});S.counters=map},
+    close(){try{es&&es.close()}catch(e){}}};
+}
+function setConn(ok){CONN_OK=ok;const d=$("#storeDot"),t=$("#storeText");if(!d)return;d.className="dot "+(ok?"ok":"local");t.textContent=ok?`Live · ${SRV?hostOf(SRV.url):""}`:"Reconnecting to server…";const b=$("#connBanner");if(b)b.hidden=ok}
+const hostOf=u=>{try{return new URL(normUrl(u)).host}catch(e){return u}};
+async function refreshMe(){try{const m=await api("/api/me");ME=m.user;RIGHTS_DEF=m.rights;ROLES_DEF=m.roles;scheduleRender()}catch(e){}}
+let authLostShown=false;
+function onAuthLost(){if(authLostShown)return;authLostShown=true;try{backend&&backend.close&&backend.close()}catch(e){}srvSave({url:SRV.url});showGate({url:SRV.url,msg:"Your session ended. Please sign in again."})}
+
+/* ---------- sign-in / connect screens ---------- */
+function gateHTML(inner){return `<div class="gate"><div class="gate-card"><div class="brand" style="color:var(--ink);padding:0;margin-bottom:6px"><i></i>Ledgerbook</div>${inner}<div class="hint" style="margin-top:18px;text-align:center">Developed by <b>${DEVELOPER}</b></div></div></div>`}
+function showGate({url,msg,setup}={}){
+  READY=false;
+  const g=$("#gate")||Object.assign(document.createElement("div"),{id:"gate"});document.body.appendChild(g);
+  const u=url||"";
+  g.innerHTML=gateHTML(`<h2 style="margin:14px 0 4px">${setup?"Create the admin account":"Sign in"}</h2>
+    <p class="hint" style="margin:0 0 14px">${setup?`This server is new. The admin can then add users and set their rights.`:`Server: <b>${esc(hostOf(u)||"not set")}</b>`}</p>
+    ${msg?`<div class="banner">${esc(msg)}</div>`:""}
+    <div class="grid" style="gap:12px">
+     ${u?"":`<label class="f"><span>Server address</span><input class="input mono" id="g_url" placeholder="192.168.1.10:8787 or https://books.myshop.in" autocomplete="off"></label>`}
+     ${setup?`<label class="f"><span>Your name</span><input class="input" id="g_name" autocomplete="name"></label>`:""}
+     <label class="f"><span>Username</span><input class="input" id="g_user" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+     <label class="f"><span>Password</span><input class="input" id="g_pass" type="password" autocomplete="${setup?"new-password":"current-password"}"></label>
+     ${setup?`<label class="f"><span>Confirm password</span><input class="input" id="g_pass2" type="password" autocomplete="new-password"></label>`:""}
+     <div id="g_err"></div>
+     <button class="btn pri lg" id="g_go" style="justify-content:center">${setup?"Create admin and sign in":"Sign in"}</button>
+     <div class="row" style="justify-content:space-between"><button class="link" id="g_change">${u?"Use a different server":""}</button><button class="link" id="g_off">Use offline on this ${DEVICE_NAME==="Web browser"?"browser":"device"}</button></div>
+    </div>`);
+  const err=m=>$("#g_err").innerHTML=`<div class="err">${esc(m)}</div>`;
+  const go=async()=>{
+    const url=normUrl(u||$("#g_url").value);if(!url)return err("Enter the server address.");
+    const user=$("#g_user").value.trim(),pass=$("#g_pass").value;if(!user||!pass)return err("Enter your username and password.");
+    $("#g_go").disabled=true;
+    try{
+      if(!u){const h=await api("/api/health",{url,token:null});if(h.setup){$("#g_go").disabled=false;return showGate({url,setup:true})}}
+      let r;
+      if(setup){if(pass!==$("#g_pass2").value){$("#g_go").disabled=false;return err("The two passwords don't match.")}r=await api("/api/setup",{url,token:null,method:"POST",body:{username:user,password:pass,name:$("#g_name").value.trim()||user}})}
+      else r=await api("/api/login",{url,token:null,method:"POST",body:{username:user,password:pass}});
+      srvSave({url,token:r.token,user:r.user.username});location.reload();
+    }catch(e){$("#g_go").disabled=false;err(e.message)}
+  };
+  $("#g_go").onclick=go;g.querySelectorAll("input").forEach(i=>i.addEventListener("keydown",e=>{if(e.key==="Enter")go()}));
+  $("#g_change").onclick=()=>{srvSave(null);showGate({})};
+  $("#g_off").onclick=()=>{srvSave(null);location.reload()};
+  setTimeout(()=>{const f=g.querySelector("input");f&&f.focus()},50);
+}
+function openConnectForm(prefill){
+  openModal("Connect to Ledgerbook Server",`<p class="hint" style="margin-top:0">Everyone in the business signs in to the same server, so the tablet at the counter and your accountant's computer see the same books live.</p>
+   <label class="f"><span>Server address</span><input class="input mono" id="cn_url" value="${esc(prefill||"")}" placeholder="192.168.1.10:8787 or https://books.myshop.in"></label>
+   <div id="cn_msg" style="margin-top:10px"></div>`,`<button class="btn" data-close>Cancel</button><button class="btn pri" id="cn_go">Continue</button>`);
+  $("#cn_go").onclick=async()=>{const url=normUrl($("#cn_url").value);if(!url){$("#cn_msg").innerHTML=`<div class="err">Enter the server address.</div>`;return}
+    $("#cn_go").disabled=true;try{const h=await api("/api/health",{url,token:null});closeModal();showGate({url,setup:h.setup})}catch(e){$("#cn_go").disabled=false;$("#cn_msg").innerHTML=`<div class="err">${esc(e.message)}</div>`}};
+}
+async function signOut(){try{await api("/api/logout",{method:"POST"})}catch(e){}srvSave({url:SRV.url});location.reload()}
+function openPasswordForm(){
+  openModal("Change password",`<div class="grid" style="gap:12px"><label class="f"><span>Current password</span><input class="input" type="password" id="pw_old" autocomplete="current-password"></label><label class="f"><span>New password</span><input class="input" type="password" id="pw_new" autocomplete="new-password"></label><label class="f"><span>Confirm new password</span><input class="input" type="password" id="pw_new2" autocomplete="new-password"></label><div id="pw_err"></div></div>`,
+   `<button class="btn" data-close>Cancel</button><button class="btn pri" id="pw_go">Change password</button>`,{narrow:true});
+  $("#pw_go").onclick=async()=>{if($("#pw_new").value!==$("#pw_new2").value){$("#pw_err").innerHTML=`<div class="err">The new passwords don't match.</div>`;return}
+    try{await api("/api/password",{method:"POST",body:{old:$("#pw_old").value,new:$("#pw_new").value}});closeModal();toast("Password changed")}catch(e){$("#pw_err").innerHTML=`<div class="err">${esc(e.message)}</div>`}};
+}
+
+/* ---------- rights-aware UI ---------- */
+const VIEW_RIGHT={sales:"sales.view",purchases:"purchases.view",inventory:"items.view",items:"items.view",customers:"parties.view",vendors:"parties.view",reports:"reports.view",accounts:"accounts.view",audit:"audit.view",users:"users.manage"};
+const viewAllowed=v=>!VIEW_RIGHT[v]||can(VIEW_RIGHT[v])||(v==="accounts"&&can("accounts.edit"));
+const RIGHT_RULES=[
+  ['[data-act="newSale"]',"sales.create"],['[data-act="newPurchase"],[data-pay-pur],#savePur,#delPur,#po_newv',"purchases.edit"],
+  ['[data-act="newItem"],[data-edit-item],#saveItem,#delItem',"items.edit"],['[data-act="newCustomer"],[data-act="newVendor"],[data-edit-party],#saveParty,#so_newc',"parties.edit"],
+  ['[data-act="newTds"],#td_save,#td_del',"taxes.edit"],['[data-act="newLedger"],[data-act="newVoucher"],[data-act="presetLedgers"],#lg_save,#lg_del,#vc_save,#vc_del,#upiLed,#cardLed',"accounts.edit"],
+  ['[data-act="exportReport"],[data-act="exportXlsx"],[data-act="exportPdf"],[data-act="exportAllLedgers"],[data-act="exportStock"]',"export"],
+  ['#cancelSale',"sales.cancel"],['#collectPay',"sales.payment"],['#saveSettings,#qrFile,label[for="qrFile"],#qrDel',"settings.edit"],
+  ['[data-act="backup"],label[for="restoreF"],#restoreF',"backup"],['[data-act="clearSample"]',"settings.edit"],
+];
+function applyRights(root){if(!SRV||!root)return;for(const [sel,r] of RIGHT_RULES)if(!can(r))root.querySelectorAll(sel).forEach(el=>{el.hidden=true;el.disabled=true})}
+const deny=()=>{toast("You don't have permission to do this. Ask your admin.");return false};
+
+/* ---------- Users & rights (admin) ---------- */
+let usersCache=null;
+function vUsers(){
+  if(!SRV)return `<div class="head"><div><h1>Users &amp; rights</h1></div></div><div class="panel"><p style="margin-top:0">Users and rights work when Ledgerbook is connected to a <b>Ledgerbook Server</b>, so several people can sign in with their own username and password.</p><button class="btn pri" data-act="connect">Connect to a server</button></div>`;
+  if(!usersCache){api("/api/users").then(r=>{usersCache=r;RIGHTS_DEF=r.rights;ROLES_DEF=r.roles;renderView()}).catch(e=>toast(e.message));return `<div class="head"><div><h1>Users &amp; rights</h1></div></div><div class="empty">Loading users…</div>`}
+  const us=usersCache.users.sort((a,b)=>(a.active===b.active?0:a.active?-1:1)||a.name.localeCompare(b.name));
+  return `<div class="head"><div><h1>Users &amp; rights</h1><div class="sub">Each person signs in with their own username and password. Rights decide what they can see and do; the server enforces them.</div></div><button class="btn pri" data-act="newUser">${ic("plus")} Add user</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Rights</th><th>Last sign-in</th><th>Status</th><th></th></tr></thead><tbody>${us.map(u=>`<tr><td><b>${esc(u.name)}</b>${u.id===ME?.id?' <span class="chip b2b">You</span>':""}</td><td class="mono">${esc(u.username)}</td><td>${esc(ROLES_DEF[u.role]?.name||u.role)}</td><td class="hint">${u.role==="admin"?"Everything":`${u.rights.length} of ${RIGHTS_DEF.length}`}</td><td class="mono">${u.lastLogin?new Date(u.lastLogin).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}):"Never"}</td><td>${u.active?'<span class="chip good">Active</span>':'<span class="chip bad">Disabled</span>'}</td><td><button class="btn sm" data-edit-user="${u.id}">Edit</button></td></tr>`).join("")}</tbody></table></div>
+  <h3 style="margin-top:20px">Roles</h3><div class="grid g3">${Object.entries(ROLES_DEF).map(([k,r])=>`<div class="panel" style="padding:14px"><b>${esc(r.name)}</b><div class="hint" style="margin-top:4px">${k==="admin"?"All rights, including users and settings.":r.rights.map(x=>esc((RIGHTS_DEF.find(y=>y[0]===x)||[x,x])[1])).join(" · ")}</div></div>`).join("")}</div>`;
+}
+function openUserForm(id){
+  const u=id?usersCache.users.find(x=>x.id===id):{role:"cashier",rights:ROLES_DEF.cashier?.rights||[],active:true};
+  const groups={};for(const [k,l] of RIGHTS_DEF){const g=l.split(":")[0];(groups[g]=groups[g]||[]).push([k,l])}
+  openModal(id?`Edit user · ${u.name}`:"Add user",`<div class="grid g2">
+    <label class="f req"><span>Full name</span><input class="input" id="us_name" value="${esc(u.name||"")}"></label>
+    <label class="f req"><span>Username</span><input class="input mono" id="us_user" value="${esc(u.username||"")}" autocapitalize="none"${id?" disabled":""}></label>
+    <label class="f${id?"":" req"}"><span>${id?"New password (leave blank to keep)":"Password"}</span><input class="input" type="password" id="us_pass" autocomplete="new-password"></label>
+    <label class="f"><span>Role</span><select class="input" id="us_role">${Object.entries(ROLES_DEF).map(([k,r])=>`<option value="${k}"${u.role===k?" selected":""}>${esc(r.name)}</option>`).join("")}</select></label>
+   </div>
+   <fieldset style="margin-top:14px"><legend>Rights</legend><div class="grid g2" id="us_rights">${Object.entries(groups).map(([g,list])=>`<div><b style="font-size:13px">${esc(g)}</b>${list.map(([k,l])=>`<label class="check" style="margin-top:6px"><input type="checkbox" value="${k}"${(u.role==="admin"||u.rights.includes(k))?" checked":""}> ${esc(l.split(": ").slice(1).join(": ")||l)}</label>`).join("")}</div>`).join("")}</div>
+   <p class="hint" id="us_hint"></p></fieldset>
+   ${id?`<label class="check" style="margin-top:12px"><input type="checkbox" id="us_active"${u.active?" checked":""}> Account active (untick to stop this person signing in)</label>`:""}
+   <div id="us_err"></div>`,`<button class="btn" data-close>Cancel</button><button class="btn pri" id="us_save">${id?"Save":"Add user"}</button>`,{wide:true});
+  const sync=(fromRole)=>{const role=$("#us_role").value,boxes=[...$("#us_rights").querySelectorAll("input")];
+    if(fromRole)boxes.forEach(b=>b.checked=role==="admin"||(ROLES_DEF[role]?.rights||[]).includes(b.value));
+    boxes.forEach(b=>b.disabled=role==="admin");$("#us_hint").textContent=role==="admin"?"Admins have every right.":"Start from the role, then tick or untick individual rights."};
+  $("#us_role").onchange=()=>sync(true);sync(false);
+  $("#us_save").onclick=async()=>{const body={name:$("#us_name").value.trim(),role:$("#us_role").value,rights:[...$("#us_rights").querySelectorAll("input:checked")].map(b=>b.value)};
+    const pw=$("#us_pass").value;if(pw)body.password=pw;if(!body.name){$("#us_err").innerHTML=`<div class="err">Enter the person's name.</div>`;return}
+    try{if(id){if($("#us_active"))body.active=$("#us_active").checked;await api("/api/users/"+id,{method:"PUT",body})}
+      else{body.username=$("#us_user").value.trim();if(!pw){$("#us_err").innerHTML=`<div class="err">Set a password (at least 6 characters).</div>`;return}await api("/api/users",{method:"POST",body})}
+      closeModal();usersCache=null;toast(id?"User updated":"User added");renderView()}catch(e){$("#us_err").innerHTML=`<div class="err">${esc(e.message)}</div>`}};
+}
+
+/* ---------- Audit trail ---------- */
+let auditCache=null,auditVerify=null;
+const ACTION_LABEL={create:"Created",update:"Edited",delete:"Deleted",cancel:"Cancelled",login:"Signed in","login-failed":"Failed sign-in",logout:"Signed out",denied:"Blocked (no right)",import:"Imported","password-changed":"Password changed",setup:"Server set up"};
+const ACTION_CHIP={create:"good",update:"b2b",delete:"bad",cancel:"bad","login-failed":"warn",denied:"warn",login:"",logout:""};
+const COLL_LABEL={sales:"Sales invoice",purchases:"Purchase",items:"Item",customers:"Customer",vendors:"Vendor",tds:"TDS entry",ledgers:"Ledger",vouchers:"Voucher",settings:"Settings",users:"User",data:"Data"};
+function vAudit(){
+  const t=todayISO();sub.from=sub.from||addDays(t,-6);sub.to=sub.to||t;
+  const filt=e=>(!sub.au||e.user?.username===sub.au)&&(!sub.ac||e.coll===sub.ac)&&(!sub.aa||e.action===sub.aa)&&e.ts.slice(0,10)>=sub.from&&e.ts.slice(0,10)<=sub.to&&(!sub.aq||JSON.stringify([e.label,e.changes]).toLowerCase().includes(sub.aq.toLowerCase()));
+  let entries;
+  if(SRV){const key=`${sub.from}|${sub.to}`;if(!auditCache||auditCache.key!==key){auditCache={key,entries:null};api(`/api/audit?from=${sub.from}&to=${sub.to}&limit=5000`).then(r=>{auditCache.entries=r.entries;renderView()}).catch(e=>{auditCache.entries=[];toast(e.message)});api("/api/audit/verify").then(v=>{auditVerify=v;const el=$("#auVerify");if(el)el.outerHTML=verifyChip()}).catch(()=>{})}
+    entries=auditCache.entries}else entries=[...S.audit].sort((a,b)=>b.ts.localeCompare(a.ts));
+  const users=[...new Set((entries||[]).map(e=>e.user?.username).filter(Boolean))];
+  const rows=(entries||[]).filter(filt);sub._auditRows=rows;
+  const when=ts=>new Date(ts).toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  sub._exportDoc=()=>({title:"Audit trail",subtitle:`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`,landscape:true,sheets:[{name:"Audit trail",head:["Date & time","User","Action","Record type","Record","Changes","Device / IP"],
+    rows:rows.map(e=>[when(e.ts),e.user?`${e.user.name||""} (${e.user.username||""})`:"",ACTION_LABEL[e.action]||e.action,COLL_LABEL[e.coll]||e.coll||"",e.label||"",(e.changes||[]).map(c=>`${c.f}: ${c.from??"—"} → ${c.to??"—"}`).join("; "),[e.device,e.ip].filter(Boolean).join(" · ")])}]});
+  return `<div class="head"><div><h1>Audit trail</h1><div class="sub">Every change is recorded: who did it, when, from which device, and the old and new values. Entries can't be edited or deleted${SRV?", and each one is chained to the previous one so tampering shows up":""}.</div></div><div class="row">${SRV?verifyChip():`<span class="chip">This device only</span>`}</div></div>
+  <div class="filters"><label class="f"><span>From</span><input class="input" type="date" id="rFrom" value="${sub.from}"></label><label class="f"><span>To</span><input class="input" type="date" id="rTo" value="${sub.to}"></label>
+   <label class="f"><span>User</span><select class="input" id="au_u"><option value="">All users</option>${users.map(u=>`<option${sub.au===u?" selected":""}>${esc(u)}</option>`).join("")}</select></label>
+   <label class="f"><span>Record type</span><select class="input" id="au_c"><option value="">All</option>${Object.entries(COLL_LABEL).map(([k,l])=>`<option value="${k}"${sub.ac===k?" selected":""}>${l}</option>`).join("")}</select></label>
+   <label class="f"><span>Action</span><select class="input" id="au_a"><option value="">All</option>${Object.entries(ACTION_LABEL).map(([k,l])=>`<option value="${k}"${sub.aa===k?" selected":""}>${l}</option>`).join("")}</select></label>
+   <label class="f" style="width:200px"><span>Search</span><input class="input" id="au_q" value="${esc(sub.aq||"")}" placeholder="Invoice no, name, field"></label>
+   <div class="row" style="margin-left:auto">${expBtns()}</div></div>
+  <div class="tablewrap">${entries===null?`<div class="empty">Loading audit trail…</div>`:rows.length?`<table><thead><tr><th>Date &amp; time</th><th>User</th><th>Action</th><th>Record</th><th>What changed</th><th></th></tr></thead><tbody>${rows.slice(0,1500).map((e,i)=>`<tr><td class="mono">${when(e.ts)}<div class="hint">${esc([e.device,e.ip].filter(Boolean).join(" · "))}</div></td><td>${esc(e.user?.name||e.user?.username||"")}<div class="hint mono">${esc(e.user?.username||"")}</div></td><td><span class="chip ${ACTION_CHIP[e.action]??""}">${esc(ACTION_LABEL[e.action]||e.action)}</span></td><td>${esc(COLL_LABEL[e.coll]||e.coll||"")}<div class="hint">${esc(e.label||"")}</div></td><td class="hint" style="max-width:420px">${(e.changes||[]).slice(0,4).map(c=>`<div><b style="color:var(--ink)">${esc(c.f)}</b>: ${esc(c.from??"—")} → ${esc(c.to??"—")}</div>`).join("")}${(e.changes||[]).length>4?`<div>+${e.changes.length-4} more</div>`:""}</td><td>${e.before||e.after||(e.changes||[]).length?`<button class="btn sm" data-audit="${i}">Details</button>`:""}</td></tr>`).join("")}</tbody></table>${rows.length>1500?`<p class="hint" style="padding:10px">Showing the latest 1,500 of ${rows.length}. Narrow the dates or export to see all.</p>`:""}`:`<div class="empty"><b>No activity in this period</b>Change the dates or filters.</div>`}</div>`;
+}
+const verifyChip=()=>`<span id="auVerify">${auditVerify?auditVerify.ok?`<span class="paid-stamp">${ic("check")} Chain intact · ${auditVerify.entries} entries</span>`:`<span class="chip bad">Chain broken at entry ${auditVerify.brokenAt+1} (${esc(auditVerify.ts||"")})</span>`:`<span class="chip">Checking…</span>`}</span>`;
+function openAuditDetail(i){
+  const e=sub._auditRows[i];if(!e)return;
+  const keys=[...new Set([...Object.keys(e.before||{}),...Object.keys(e.after||{})])].filter(k=>!["_rev","_at","_by"].includes(k));
+  const fmtV=v=>v===undefined?"—":typeof v==="string"?v:JSON.stringify(v,null,1);
+  openModal(`${ACTION_LABEL[e.action]||e.action} · ${COLL_LABEL[e.coll]||e.coll}`,`<p class="hint" style="margin-top:0">${esc(new Date(e.ts).toLocaleString("en-IN"))} · ${esc(e.user?.name||"")} (${esc(e.user?.username||"")}) · ${esc([e.device,e.ip].filter(Boolean).join(" · "))}${e.hash?`<br>Entry hash: <span class="mono">${e.hash.slice(0,24)}…</span>`:""}</p>
+   <div class="tablewrap"><table><thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead><tbody>${(keys.length?keys:(e.changes||[]).map(c=>c.f)).map(k=>{const b=e.before?e.before[k]:(e.changes||[]).find(c=>c.f===k)?.from,a=e.after?e.after[k]:(e.changes||[]).find(c=>c.f===k)?.to,same=JSON.stringify(b)===JSON.stringify(a);
+     return `<tr${same?' style="opacity:.55"':""}><td class="mono">${esc(k)}</td><td style="white-space:pre-wrap;max-width:360px;font-size:12px">${esc(k==="upiQr"&&b?"(image)":fmtV(b)).slice(0,1200)}</td><td style="white-space:pre-wrap;max-width:360px;font-size:12px;${same?"":"background:var(--accent-soft)"}">${esc(k==="upiQr"&&a?"(image)":fmtV(a)).slice(0,1200)}</td></tr>`}).join("")}</tbody></table></div>`,`<button class="btn pri" data-close>Close</button>`,{wide:true});
+}
+/* local-mode audit (this device only) */
+function auditDiff(a,b){const out=[],keys=new Set([...Object.keys(a||{}),...Object.keys(b||{})]);for(const k of keys){if(["_rev","_at","_by"].includes(k))continue;const x=a?.[k],y=b?.[k];if(JSON.stringify(x)===JSON.stringify(y)||((x===undefined||x===""||x===null)&&(y===undefined||y===""||y===null)))continue;const s=v=>v===undefined?undefined:Array.isArray(v)?`${v.length} lines`:(typeof v==="string"?v:JSON.stringify(v)).slice(0,140);out.push({f:k,from:k==="upiQr"&&x?"(image)":s(x),to:k==="upiQr"&&y?"(image)":s(y)})}return out}
+function auditLabel(c,d){if(!d)return "";return c==="sales"?`${d.no||""} · ${d.party?.name||""}`:c==="purchases"?`Bill ${d.billNo||""} · ${d.party?.name||""}`:c==="items"?`${d.sku||""} · ${d.name||""}`:c==="vouchers"?`${d.type||""} ${d.no||""}`:c==="tds"?`TDS · ${d.payee||""}`:d.name||d.id||""}
+
+/* ---------- settings panel: multi-user & network ---------- */
+function muPanel(){
+  const host=DESKTOP&&NATIVE.serverInfo;
+  let html=`<div class="panel" style="max-width:860px;margin-top:16px"><h2>Multi-user &amp; network</h2>`;
+  if(SRV){html+=`<p style="margin-top:0">Connected to <b class="mono">${esc(normUrl(SRV.url))}</b> as <b>${esc(ME?.name||"")}</b> (${esc(ME?.username||"")} · ${esc(ROLES_DEF[ME?.role]?.name||ME?.role||"")}). Changes from every device appear here live.</p>
+     <div class="row"><button class="btn" data-act="changePw">Change password</button><button class="btn" data-act="signOut">Sign out</button>${can("users.manage")?`<button class="btn" data-go="users">Users &amp; rights</button>`:""}${can("backup")?`<button class="btn" data-act="uploadLocal">Copy this device's offline data to the server…</button>`:""}<button class="btn danger" data-act="disconnect">Stop using the server on this device</button></div>`}
+  else html+=`<p style="margin-top:0">Right now Ledgerbook keeps the books on this ${DEVICE_NAME==="Web browser"?"browser":"device"} only. To let several people work at the same time (for example the shopkeeper on the Android tablet and the accountant on a computer), connect every device to one <b>Ledgerbook Server</b>. Each person then signs in with their own username and password, and every change goes into the audit trail.</p>
+     <div class="row"><button class="btn pri" data-act="connect">Connect to a server</button></div>
+     <p class="hint">Where's the server? Either run it on a shop computer with the Windows app (below), or put it in the cloud so you can work from anywhere. See the README in the project for cloud setup.</p>`;
+  if(host)html+=`<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><h3>Host the server on this computer</h3><div id="hostBox" class="hint">Checking…</div></div>`;
+  return html+`</div>`;
+}
+async function refreshHostBox(){
+  const el=$("#hostBox");if(!el||!DESKTOP||!NATIVE.serverInfo)return;
+  const i=await NATIVE.serverInfo();
+  el.innerHTML=i.running?`<p style="margin:0 0 8px;color:var(--ink)"><span class="paid-stamp">${ic("check")} Server running</span></p>
+    <p style="margin:0 0 6px;color:var(--ink)">On the Android tablet and other computers, connect to:</p>${i.urls.length?i.urls.map(u=>`<div class="mono" style="font-size:18px;color:var(--ink)">${esc(u)}</div>`).join(""):`<div>No network found. Connect this computer to the shop Wi-Fi.</div>`}
+    <p>Keep this computer on while others are working. If Windows asks about the firewall, allow access on private networks. Data folder: <span class="mono">${esc(i.dataDir)}</span></p>
+    <div class="row">${SRV?"":`<button class="btn pri" data-act="useLocalServer">${i.users?"Sign in on this computer":"Create the admin account"}</button>`}<button class="btn" data-act="hostStop">Stop server</button><label class="check"><input type="checkbox" id="hostAuto"${i.autoStart?" checked":""}> Start automatically with the app</label></div>`
+   :`<p style="margin:0 0 10px">Run Ledgerbook Server on this PC so the tablet and other computers on the same Wi-Fi or office network can share the books. No internet needed.</p><div class="row"><button class="btn pri" data-act="hostStart">Start server</button><label class="check"><input type="checkbox" id="hostAuto"${i.autoStart?" checked":""}> Start automatically with the app</label></div>`;
+  const a=$("#hostAuto");if(a)a.onchange=()=>NATIVE.serverAuto(a.checked);
+}
+async function uploadLocalData(){
+  let d;try{d=await readLocalStore()}catch(e){toast("Couldn't read this device's offline data");return}
+  const n=COLLS.reduce((a,c)=>a+(d[c]||[]).length,0);
+  if(!n){toast("There is no offline data on this device to copy");return}
+  openModal("Copy offline data to the server",`<p style="margin-top:0">This device has ${n} records saved offline (${COLLS.filter(c=>(d[c]||[]).length).map(c=>`${(d[c]||[]).length} ${c}`).join(", ")}).</p><p class="hint">If the server is empty, everything is copied as it is, including invoice numbering. If it already has records, they are merged by ID.</p><div id="up_msg"></div>`,`<button class="btn" data-close>Cancel</button><button class="btn pri" id="up_go">Copy to server</button>`);
+  $("#up_go").onclick=async()=>{$("#up_go").disabled=true;try{let r;try{r=await api("/api/import",{method:"POST",body:{data:d}})}catch(e){if(e.status===409)r=await api("/api/import",{method:"POST",body:{data:d,merge:true}});else throw e}closeModal();toast(`${r.imported} records copied to the server`);await backend.loadAll();scheduleRender()}catch(e){$("#up_go").disabled=false;$("#up_msg").innerHTML=`<div class="err">${esc(e.message)}</div>`}};
+}
+async function readLocalStore(){
+  const out={settings:{},counters:{}};for(const c of COLLS)out[c]=[];
+  const idb=await idbOpen();
+  const all=await new Promise((res,rej)=>{const o=[];const c=idb.transaction("kv","readonly").objectStore("kv").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){o.push([cur.key,cur.value]);cur.continue()}else res(o)};c.onerror=()=>rej(c.error)});
+  for(const [k,v] of all){const [coll]=String(k).split("/");if(COLLS.includes(coll))out[coll].push(v);else if(k==="settings")out.settings=v;else if(k==="counters")out.counters=v}
+  return out;
+}
+
 /* ---------- Settings ---------- */
 function vSettings(){
   const B=S.settings,hasSample=COLLS.some(c=>S[c].some(x=>x.sample));
@@ -1763,10 +2003,11 @@ function vSettings(){
    <label class="check" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="st_autoPrint"${B.autoPrint?" checked":""}${NATIVE?"":" disabled"}> Open the print screen after saving an invoice${NATIVE?"":" (tablet app only)"}</label>
   </div>
   <div id="stErr"></div><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="saveSettings">Save settings</button></div></div>
+  ${muPanel()}
   <div class="panel" style="max-width:860px;margin-top:16px"><h2>Data</h2>
-   <p class="muted" style="margin-top:0">${backend?.kind==="db"?"Records are saved to this page's own storage and stay in sync wherever you open it.":NATIVE?`Records are saved on this ${DEVICE}. Uninstalling the app or clearing its data deletes them.`:"Records are saved in this browser only."} Download a backup regularly.</p>
+   <p class="muted" style="margin-top:0">${backend?.kind==="db"?"Records are saved to this page's own storage and stay in sync wherever you open it.":SRV?"Records are saved on the Ledgerbook Server and shared live with every signed-in device.":NATIVE?`Records are saved on this ${DEVICE}. Uninstalling the app or clearing its data deletes them.`:"Records are saved in this browser only."} Download a backup regularly.</p>
    <div class="row"><button class="btn" data-act="backup">Download backup (.json)</button><label class="btn" for="restoreF">Restore from backup…</label><input type="file" id="restoreF" accept=".json,application/json" hidden></div>
-   ${hasSample?`<div style="margin-top:14px"><p class="muted">Sample records are marked <span class="chip sample">Sample</span>. Remove them before you start real billing.</p><button class="btn danger" data-act="clearSample">Remove sample data</button></div>`:""}
+   ${hasSample&&!SRV?`<div style="margin-top:14px"><p class="muted">Sample records are marked <span class="chip sample">Sample</span>. Remove them before you start real billing.</p><button class="btn danger" data-act="clearSample">Remove sample data</button></div>`:""}
    <div id="dataMsg"></div></div>
   <div class="panel" style="max-width:860px;margin-top:16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
    <div class="brand" style="color:var(--ink);padding:0"><i></i></div>
@@ -1777,6 +2018,9 @@ function vSettings(){
 /* ---------- bindings ---------- */
 function bindView(){
   const m=$("#main");
+  applyRights(m);refreshHostBox().catch(()=>{});
+  for(const [id,k] of [["#au_u","au"],["#au_c","ac"],["#au_a","aa"]]){const el=$(id);if(el)el.addEventListener("change",()=>{sub[k]=el.value;renderView()})}
+  {const el=$("#au_q");if(el)el.addEventListener("input",()=>{sub.aq=el.value;clearTimeout(el._t);el._t=setTimeout(()=>{const pos=el.selectionStart;renderView();const n=$("#au_q");if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}},250)})}
   const debounce=(id,key)=>{const el=$(id);if(!el)return;el.addEventListener("input",()=>{sub[key]=el.value;clearTimeout(el._t);el._t=setTimeout(()=>{const pos=el.selectionStart;renderView();const n=$(id);if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}},180)})};
   debounce("#itemQ","q");debounce("#invQ","q");debounce("#partyQ","q");debounce("#saleQ","q");debounce("#purQ","q");
   {const el=$("#ledQ");if(el)el.addEventListener("input",()=>{sub.lq=el.value;clearTimeout(el._t);el._t=setTimeout(()=>{const pos=el.selectionStart;renderView();const n=$("#ledQ");if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}},200)})}
@@ -1823,6 +2067,8 @@ $("#main").addEventListener("click",async e=>{
   if(t.dataset.atab){sub={atab:t.dataset.atab,from:sub.from,to:sub.to,lid:sub.lid};return renderView()}
   if(t.dataset.stmt){if(view!=="accounts")go("accounts");sub.atab="statement";sub.lid=t.dataset.stmt;return renderView()}
   if(t.dataset.editLedger)return openLedgerForm(t.dataset.editLedger);
+  if(t.dataset.editUser)return openUserForm(t.dataset.editUser);
+  if(t.dataset.audit!==undefined)return openAuditDetail(+t.dataset.audit);
   if(t.dataset.editVoucher)return openVoucherForm(null,t.dataset.editVoucher);
   if(t.dataset.payPur){const pu=byId("purchases",t.dataset.payPur);if(pu){await guard(()=>backend.put("purchases",{...pu,paidOn:todayISO()}));toast(`Bill ${pu.billNo} marked paid today`)}return}
   if(t.dataset.range){const [a,b]=t.dataset.range.split(",");sub.from=a;sub.to=b;return renderView()}
@@ -1838,6 +2084,15 @@ $("#main").addEventListener("click",async e=>{
   if(a==="newVendor")openPartyForm("vendors");
   if(a==="newTds")openTdsForm();
   if(a==="newLedger")openLedgerForm();
+  if(a==="newUser")return openUserForm();
+  if(a==="connect")return openConnectForm();
+  if(a==="signOut")return signOut();
+  if(a==="changePw")return openPasswordForm();
+  if(a==="uploadLocal")return uploadLocalData();
+  if(a==="disconnect"){return confirmIn("#dataMsg","Stop using the server on this device? You'll go back to the offline books saved on this device. Nothing on the server is deleted.",()=>{try{backend.close()}catch(e){}srvSave(null);location.reload()})}
+  if(a==="hostStart"){try{await NATIVE.serverStart();toast("Server started")}catch(e){toast("Couldn't start the server: "+(e.message||e))}return refreshHostBox()}
+  if(a==="hostStop"){await NATIVE.serverStop();toast("Server stopped");return refreshHostBox()}
+  if(a==="useLocalServer"){const i=await NATIVE.serverInfo();const h=await api("/api/health",{url:i.local,token:null});return showGate({url:i.local,setup:h.setup})}
   if(a==="newVoucher")openVoucherForm(t.dataset.vt||"Expense");
   if(a==="exportXlsx"||a==="exportPdf"){const d=currentExportDoc();if(!d){toast("Nothing to export here");return}return a==="exportXlsx"?exportXlsx(d):exportPdf(d)}
   if(a==="exportAllLedgers")return exportAllLedgers();
@@ -1856,14 +2111,26 @@ window.__onBack=()=>{if($("#modalRoot").firstChild){closeModal();return true}if(
 /* ---------- boot ---------- */
 (async function boot(){
   try{const h=(location.hash||"").slice(1);if(VIEWS.some(v=>v[0]===h))view=h}catch(e){}
-  let db=null;
-  if(!NATIVE&&window.claude&&typeof window.claude.use==="function"){
-    try{db=await window.claude.use("db")}catch(e){db=null}
-    try{downloadsNS=await window.claude.use("downloads")}catch(e){}
+  let cfg=srvCfg();
+  // opened from a Ledgerbook Server in a web browser: use that server automatically
+  if(!cfg&&!NATIVE&&!window.claude&&/^https?:$/.test(location.protocol)){try{const r=await fetch(location.origin+"/api/health");const h=await r.json();if(h&&h.name==="Ledgerbook Server"){cfg={url:location.origin};srvSave(cfg)}}catch(e){}}
+  if(cfg&&cfg.url){
+    SRV=cfg;
+    if(!cfg.token){let setup=false;try{setup=(await api("/api/health",{url:cfg.url,token:null})).setup}catch(e){}return showGate({url:cfg.url,setup})}
+    try{const me=await api("/api/me");ME=me.user;RIGHTS_DEF=me.rights;ROLES_DEF=me.roles;backend=serverBackend();await backend.init()}
+    catch(e){if(e.code==="auth")return;return showGate({url:cfg.url,msg:e.message})}
+    setConn(true);
+  }else{
+    let db=null;
+    if(!NATIVE&&window.claude&&typeof window.claude.use==="function"){
+      try{db=await window.claude.use("db")}catch(e){db=null}
+      try{downloadsNS=await window.claude.use("downloads")}catch(e){}
+    }
+    if(db){backend=dbBackend(db);$("#storeDot").className="dot ok";$("#storeText").textContent="Saved to this page's storage · synced"}
+    else{backend=await localBackend();$("#storeDot").className="dot "+(NATIVE?"ok":"local");$("#storeText").textContent=NATIVE?`Saved on this ${DEVICE}`:"Saved in this browser only";}
+    if(DESKTOP&&NATIVE.serverInfo){try{const i=await NATIVE.serverInfo();if(i.running){/* hosting but not signed in: nudge from Settings */}}catch(e){}}
   }
-  if(db){backend=dbBackend(db);$("#storeDot").className="dot ok";$("#storeText").textContent="Saved to this page's storage · synced"}
-  else{backend=await localBackend();$("#storeDot").className="dot "+(NATIVE?"ok":"local");$("#storeText").textContent=NATIVE?`Saved on this ${DEVICE}`:"Saved in this browser only";}
   if(NATIVE)setTimeout(()=>loadPdfLib().catch(()=>{}),1500);
-  renderShell();renderView();
+  READY=true;renderShell();renderView();
 })();
 </script>
