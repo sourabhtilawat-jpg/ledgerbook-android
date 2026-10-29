@@ -120,3 +120,26 @@ Ledgerbook prepares the files the government portals accept; you sign in and upl
 - Filing straight from the app (no upload) needs a GST Suvidha Provider (GSP) account and an API user on the portal.
 
 Also new: credit notes (sales returns), debit notes (purchase returns), quotations that convert to invoices, outstanding receivables/payables with ageing and WhatsApp reminders, day book, GSTIN checksum validation, and MRP-style prices that include GST.
+
+## Ledgerbook 2.0
+
+**Easier to use:** a new home screen with quick actions, a "needs attention" list (low stock, expiring batches, overdue payments, GST due dates, recurring invoices), a getting-started checklist, search everything (Ctrl+K or the Search button), and a grouped menu. Hindi (हिन्दी) is available in Settings.
+
+**Turn features on in Settings → Features** so the screens stay simple:
+
+| Feature | What it adds |
+|---|---|
+| Orders & delivery challans | Sales orders → delivery challans → invoices; purchase orders → "Receive goods" fills the purchase bill |
+| Recurring invoices | Open an invoice → Repeat. Due invoices are created in one tap from the home screen |
+| Barcodes | Barcode labels (A4 sheets or label printer rolls), billing with a USB scanner or the camera |
+| Banking | Bank statement import (CSV) with auto-matching, reconciliation, cheque printing (CTS-2010) |
+| Price lists | Wholesale / dealer prices, picked automatically for each customer |
+| Batches & expiry | Batch and expiry on purchases, first-expiry-first-out billing, expiry alerts |
+| Godowns | Stock per location and transfers between them |
+| Manufacturing | Bill of materials and production entries, valued at component cost |
+| Payroll | Employees, salary runs, PF, ESI, professional tax, TDS, payslips on WhatsApp |
+| Exports | Export invoices in foreign currency, with or without IGST (LUT), in GSTR-1 table 6A |
+| TCS | Tax collected at source on invoices, with a TCS register |
+| Cost centres & budgets | Profit by branch or project, and budget vs actual |
+
+Also new: stock count / adjustment, item ledger, GSTR-2B reconciliation, GSTR-9 working, composition scheme (bill of supply, CMP-08 and GSTR-4 working), cash flow statement, financial ratios, several companies on one device, and a "scan to pay" UPI QR printed on unpaid invoices.

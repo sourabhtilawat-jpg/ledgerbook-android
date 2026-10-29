@@ -14,8 +14,8 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 
-const VERSION = "1.5.0";
-const COLLS = ["items", "customers", "vendors", "purchases", "sales", "tds", "ledgers", "vouchers", "creditNotes", "debitNotes", "quotes"];
+const VERSION = "2.0.0";
+const COLLS = ["items", "customers", "vendors", "purchases", "sales", "tds", "ledgers", "vouchers", "creditNotes", "debitNotes", "quotes", "salesOrders", "challans", "purchaseOrders", "recurring", "transfers", "productions", "bankStmt", "reco", "gstr2b", "employees", "payruns"];
 const RIGHTS = [
   ["sales.view", "Sales: view invoices"], ["sales.create", "Sales: create invoices"], ["sales.payment", "Sales: collect payments"],
   ["sales.edit", "Sales: edit invoices"], ["sales.cancel", "Sales: cancel invoices"],
@@ -108,7 +108,10 @@ function createLedgerbookServer(opts = {}) {
       case "items": return `${d.sku || ""} · ${d.name || ""}`;
       case "vouchers": return `${d.type || ""} ${d.no || ""}`;
       case "tds": return `TDS · ${d.payee || ""}`;
-      case "creditNotes": case "debitNotes": case "quotes": return `${d.no || ""} · ${(d.party && d.party.name) || ""}`;
+      case "creditNotes": case "debitNotes": case "quotes": case "salesOrders": case "challans": case "purchaseOrders": return `${d.no || ""} · ${(d.party && d.party.name) || ""}`;
+      case "transfers": case "productions": return `${d.no || ""} ${d.reason || d.name || ""}`;
+      case "payruns": return `Salary ${d.month || ""}`;
+      case "employees": return d.name || "";
       default: return d.name || d.id || "";
     }
   };
@@ -156,7 +159,7 @@ function createLedgerbookServer(opts = {}) {
     for (const c of clients) { if (!filter || filter(c)) { try { c.res.write(data); } catch (e) { /* closed */ } } }
   }
   setInterval(() => { for (const c of clients) { try { c.res.write(": ping\n\n"); } catch (e) { /* closed */ } } }, 25000).unref();
-  const canReadColl = (u, c) => (c === "ledgers" || c === "vouchers" ? has(u, "accounts.view") || has(u, "accounts.edit") : true);
+  const canReadColl = (u, c) => (["ledgers", "vouchers", "bankStmt", "reco", "employees", "payruns"].includes(c) ? has(u, "accounts.view") || has(u, "accounts.edit") : true);
 
   /* ---------- rights per write ---------- */
   function rightFor(c, before, after) {
@@ -176,7 +179,11 @@ function createLedgerbookServer(opts = {}) {
       case "ledgers": case "vouchers": return ["accounts.edit"];
       case "creditNotes": return ["sales.edit", "sales.cancel"];
       case "debitNotes": return ["purchases.edit"];
-      case "quotes": return ["sales.create", "sales.edit"];
+      case "quotes": case "salesOrders": case "challans": case "recurring": return ["sales.create", "sales.edit"];
+      case "purchaseOrders": return ["purchases.edit"];
+      case "transfers": case "productions": return ["items.edit"];
+      case "bankStmt": case "reco": case "employees": case "payruns": return ["accounts.edit"];
+      case "gstr2b": return ["taxes.edit", "purchases.edit", "accounts.edit"];
       default: return ["__none__"];
     }
   }
@@ -266,7 +273,7 @@ function createLedgerbookServer(opts = {}) {
         return;
       }
       let m;
-      if ((m = p.match(/^\/api\/doc\/([A-Za-z]+)\/([A-Za-z0-9_\-.~:@+]{1,200})$/))) {
+      if ((m = p.match(/^\/api\/doc\/([A-Za-z0-9]+)\/([A-Za-z0-9_\-.~:@+]{1,200})$/))) {
         const c = m[1], id = decodeURIComponent(m[2]);
         if (!COLLS.includes(c)) return send(res, 404, { error: "Unknown record type." });
         const before = db.colls[c][id] || null;

@@ -1,6 +1,10 @@
 package com.ledgerbook.billing;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.webkit.PermissionRequest;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -27,6 +31,8 @@ public class MainActivity extends Activity {
     static final String HOST = "appassets.androidplatform.net";
     static final String ORIGIN = "https://" + HOST;
     private static final int FILE_REQUEST = 41;
+    private static final int CAM_REQUEST = 42;
+    private PermissionRequest pendingPerm;
 
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
@@ -45,6 +51,7 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(false);
         s.setTextZoom(100);
         s.setSupportZoom(false);
+        s.setMediaPlaybackRequiresUserGesture(false);
         // Lets the app talk to a Ledgerbook Server on the shop network (http://192.168.x.x:8787)
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
@@ -83,6 +90,22 @@ public class MainActivity extends Activity {
         });
 
         web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean cam = false;
+                    for (String r : request.getResources())
+                        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) cam = true;
+                    if (!cam) { request.deny(); return; }
+                    if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                        pendingPerm = request;
+                        requestPermissions(new String[]{Manifest.permission.CAMERA}, CAM_REQUEST);
+                    } else {
+                        request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+                    }
+                });
+            }
+
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
@@ -138,6 +161,18 @@ public class MainActivity extends Activity {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        if (requestCode == CAM_REQUEST && pendingPerm != null) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+                pendingPerm.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            else pendingPerm.deny();
+            pendingPerm = null;
+            return;
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, results);
     }
 
     @Override
