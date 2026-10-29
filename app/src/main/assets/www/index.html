@@ -239,8 +239,8 @@ const STATES=[["01","Jammu & Kashmir"],["02","Himachal Pradesh"],["03","Punjab"]
 const STATE_NAME=Object.fromEntries(STATES);
 const GST_RATES=[0,0.25,3,5,12,18,28,40];
 const UNITS=["PCS","NOS","BOX","BAG","KGS","GMS","LTR","MTR","SET","PAC","DOZ","BTL","ROL","SQM"];
-const COLLS=["items","customers","vendors","purchases","sales","tds"];
-const APP_VERSION="1.2";
+const COLLS=["items","customers","vendors","purchases","sales","tds","ledgers","vouchers"];
+const APP_VERSION="1.3";
 const DEVELOPER="Sourabh Tilawat";
 /* TDS on resident payments under section 393(1), Income-tax Act 2025 (from 1 Apr 2026). Old 1961-Act section shown for familiarity.
    Rates per published FY 2026-27 rate charts; payment codes are left for the user because published code lists differ. */
@@ -272,6 +272,7 @@ const ICON={
   reports:'<path d="M3 21h18M6 17v-6M11 17V5M16 17v-9M21 17v-3"/>',
   settings:'<path d="M4 6.5h9M18 6.5h2M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15.5" cy="6.5" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="17" cy="17.5" r="2.2"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
+  accounts:'<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16.5H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 21a2.5 2.5 0 0 1 2.5-2.5H20V22H6.5A2.5 2.5 0 0 1 4 19.5M8.5 6.5h7M8.5 10h5"/>',
   qr:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20.5h3M20 17.5v3.5"/>',
   cash:'<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 9.5v.01M18 14.5v.01"/>',
   card:'<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6 15h4"/>',
@@ -281,10 +282,10 @@ const ICON={
   rupee:'<path d="M7 4.5h10M7 9h10M7 4.5h3.5a4.5 4.5 0 0 1 0 9H7l8 6.5"/>',
 };
 const ic=n=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||""}</svg>`;
-const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["settings","Settings"]];
+const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["accounts","Accounts"],["settings","Settings"]];
 
 /* ---------- state ---------- */
-const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],settings:{},counters:{}};
+const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],ledgers:[],vouchers:[],settings:{},counters:{}};
 let view="dashboard", sub={}, backend=null, renderQueued=false;
 const TAB=Math.random().toString(36).slice(2);
 
@@ -367,7 +368,7 @@ async function localBackend(){
   const tx=(mode,fn)=>new Promise((res,rej)=>{const t=idb.transaction("kv",mode);const st=t.objectStore("kv");const out=fn(st);t.oncomplete=()=>res(out&&out.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)});
   const idbPut=(k,v)=>tx("readwrite",st=>st.put(v,k));
   const idbDel=k=>tx("readwrite",st=>st.delete(k));
-  const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
+  const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
   if(idb){
     const all=await new Promise((res,rej)=>{const out=[];const t=idb.transaction("kv","readonly");const c=t.objectStore("kv").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push([cur.key,cur.value]);cur.continue()}else res(out)};c.onerror=()=>rej(c.error)});
     for(const [k,v] of all){const [coll]=String(k).split("/");if(COLLS.includes(coll))S[coll].push(v);else if(k==="settings")S.settings=v;else if(k==="counters")S.counters=v}
@@ -552,7 +553,7 @@ document.addEventListener("keydown",e=>{if($("#modalRoot").firstChild){if(e.key=
 
 function renderView(){
   const m=$("#main");
-  const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,settings:vSettings}[view]||vDash;
+  const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,accounts:vAccounts,settings:vSettings}[view]||vDash;
   m.innerHTML=(backend?.kind==="local"&&!NATIVE?`<div class="banner">Your data is saved in this browser only. Use Settings → Backup to keep a copy.</div>`:"")+fn();
   bindView();
 }
@@ -1010,7 +1011,8 @@ function openPurchaseForm(editId){
   <div class="grid g4" style="margin-top:14px">
    <label class="f"><span>Credit days agreed</span><input class="input" id="po_cdays" type="number" min="0" max="365" value="${ex?.creditDays??""}" placeholder="From vendor"></label>
    <label class="f"><span>Paid on (leave blank if unpaid)</span><input class="input" id="po_paid" type="date" value="${ex?.paidOn||""}"></label>
-   <div class="f span2" id="po_due" style="font-size:12px;color:var(--muted);justify-content:flex-end"></div>
+   <label class="f"><span>Paid from</span><select class="input" id="po_from">${ledgerOpts(l=>l.group==="cash"||l.group==="bank",ex?.paidFrom||"sys:bank")}</select></label>
+   <div class="f" id="po_due" style="font-size:12px;color:var(--muted);justify-content:flex-end"></div>
   </div>
   <fieldset style="margin-top:14px"><legend>TDS</legend>
    <label class="check"><input type="checkbox" id="po_tdsOn"${exTds?" checked":""}> Deduct TDS on this bill</label>
@@ -1046,7 +1048,7 @@ function openPurchaseForm(editId){
     if(!v)return err("Choose a vendor.");if(!bill)return err("Enter the vendor's bill number.");if(!date)return err("Choose the bill date.");if(!lines.length)return err("Add at least one item with a quantity.");
     if(S.purchases.some(p=>p.partyId===v.id&&p.billNo.toLowerCase()===bill.toLowerCase()&&p.id!==editId))return err(`Bill ${esc(bill)} from this vendor is already recorded.`);
     const o={...(ex||{}),id:editId||uid(),billNo:bill,date,partyId:v.id,party:{name:v.name,gstin:v.gstin||"",bill:v.bill,ship:v.ship},inter:inter(),lines:lines.map(l=>({itemId:l.itemId,name:l.name,sku:l.sku,hsn:l.hsn,unit:l.unit,qty:num(l.qty),rate:num(l.rate),disc:num(l.disc),gst:num(l.gst)})),notes:$("#po_notes").value.trim()};
-    const cd=$("#po_cdays").value.trim();o.creditDays=cd===""?null:num(cd);o.paidOn=$("#po_paid").value||"";
+    const cd=$("#po_cdays").value.trim();o.creditDays=cd===""?null:num(cd);o.paidOn=$("#po_paid").value||"";o.paidFrom=$("#po_from").value||"sys:bank";
     if(o.paidOn&&o.paidOn<date)return err("The paid-on date is before the bill date.");
     o.grand=docCalc(o).grand;
     const tdsOn=$("#po_tdsOn").checked;
@@ -1076,10 +1078,15 @@ function openTdsForm(id){
    <label class="f"><span>TDS deducted</span><input class="input mono" id="td_tds" type="number" step="0.01" min="0" value="${e.tds??""}"${linked?" disabled":""}></label>
    <div class="hint span2" id="td_hint" style="align-self:end"></div>
   </div>
+  ${linked?"":`<fieldset style="margin-top:14px"><legend>Accounting</legend><div class="grid g2">
+   <label class="f"><span>Expense ledger (e.g. Rent, Professional Fees)</span><select class="input" id="td_exp"><option value="">Don't post to accounts</option>${ledgerOpts(l=>GRP[l.group]?.nat==="E"||l.group==="fixed",e.expLedger)}</select></label>
+   <label class="f"><span>Net amount paid from</span><select class="input" id="td_from">${ledgerOpts(l=>l.group==="cash"||l.group==="bank",e.paidFrom||"sys:bank")}</select></label>
+  </div></fieldset>`}
   <fieldset style="margin-top:14px"><legend>Deposit (challan)</legend><div class="grid g3">
    <label class="f"><span>BSR code</span><input class="input mono" id="td_bsr" maxlength="7" inputmode="numeric" value="${esc(e.bsr)}"></label>
    <label class="f"><span>Challan serial no.</span><input class="input mono" id="td_chl" maxlength="10" value="${esc(e.challan)}"></label>
    <label class="f"><span>Date deposited</span><input class="input" type="date" id="td_dep" value="${e.depDate||""}"></label>
+   <label class="f"><span>Deposited from</span><select class="input" id="td_depf">${ledgerOpts(l=>l.group==="cash"||l.group==="bank",e.depFrom||"sys:bank")}</select></label>
   </div></fieldset>
   ${linked?`<p class="hint">Linked to a purchase bill (${esc(e.ref||"")}). Change the amount from that purchase.</p>`:""}
   <datalist id="td_vendors">${S.vendors.map(v=>`<option value="${esc(v.name)}"></option>`).join("")}</datalist>
@@ -1099,7 +1106,8 @@ function openTdsForm(id){
     if(num($("#td_amt").value)<=0)return err("Enter the amount paid or credited.");
     if(pan&&!PAN_RE.test(pan))return err("PAN should look like ABCDE1234F.");
     const bsr=$("#td_bsr").value.trim();if(bsr&&!/^\d{7}$/.test(bsr))return err("BSR code has 7 digits.");
-    const o={...e,id:e.id||uid(),date:$("#td_date").value,payee:$("#td_payee").value.trim(),pan,section:$("#td_sec").value,amount:num($("#td_amt").value),code:$("#td_code").value.trim(),rate:num($("#td_rate").value),tds:num($("#td_tds").value),bsr,challan:$("#td_chl").value.trim(),depDate:$("#td_dep").value||""};
+    const o={...e,id:e.id||uid(),date:$("#td_date").value,payee:$("#td_payee").value.trim(),pan,section:$("#td_sec").value,amount:num($("#td_amt").value),code:$("#td_code").value.trim(),rate:num($("#td_rate").value),tds:num($("#td_tds").value),bsr,challan:$("#td_chl").value.trim(),depDate:$("#td_dep").value||"",depFrom:$("#td_depf").value};
+    if(!linked){o.expLedger=$("#td_exp").value||"";o.paidFrom=$("#td_from").value}
     await guard(()=>backend.put("tds",o));closeModal();toast(id?"TDS entry saved":"TDS entry added");
   };
   if($("#td_del"))$("#td_del").onclick=()=>confirmIn("#tdErr","Delete this TDS entry?",async()=>{await guard(()=>backend.remove("tds",id));closeModal();toast("TDS entry deleted")});
@@ -1115,7 +1123,7 @@ function rangeFilters(){
 const inRange=d=>d.date>=sub.from&&d.date<=sub.to;
 
 function vReports(){
-  const tab=sub.tab||"sales";
+  const tab=sub.tab||"sales";sub._exportDoc=null;
   const tabs=[["sales","Sales register"],["purchase","Purchase register"],["gstr1","GSTR-1"],["gstr3b","GSTR-3B"],["tds","TDS · Form 140"],["msme","MSME dues"],["itemwise","Item-wise sales"],["stock","Stock summary"]];
   let body="";
   const T=tabs.map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${tab===k}">${l}</button>`).join("");
@@ -1126,7 +1134,7 @@ function vReports(){
     sub._export=()=>[[isS?"Invoice No":"Bill No","Date",isS?"Customer":"Vendor","GSTIN",isS?"Place of Supply":"Vendor State","Taxable","CGST","SGST","IGST","Round off","Total","Status",...(isS?["Type","Payment"]:[])],...rows.map(({d,c,x})=>[isS?d.no:d.billNo,fmtDate(d.date),d.party?.name,d.party?.gstin,isS?stateLabel(d.pos):stateLabel(d.party?.bill?.state),x?0:c.taxable,x?0:c.cgst,x?0:c.sgst,x?0:c.igst,x?0:c.round,x?0:c.grand,x?"Cancelled":"Active",...(isS?[saleType(d).toUpperCase(),payInfo(d).label]:[])]),["Total","","","","",r2(tot.tx),r2(tot.c),r2(tot.s),r2(tot.i),"",r2(tot.g),""]];
     sub._file=`${isS?"sales":"purchase"}-register_${sub.from}_to_${sub.to}.csv`;
     body=rangeFilters()+`<div class="tiles"><div class="tile"><div class="k">${isS?"Invoices":"Bills"}</div><div class="v">${rows.filter(r=>!r.x).length}</div>${isS?`<div class="n">${rows.filter(r=>r.x).length} cancelled</div>`:""}</div><div class="tile"><div class="k">Taxable value</div><div class="v">${money(tot.tx)}</div></div><div class="tile"><div class="k">${isS?"Output":"Input"} GST</div><div class="v">${money(tot.c+tot.s+tot.i)}</div><div class="n">CGST ${amt(tot.c)} · SGST ${amt(tot.s)} · IGST ${amt(tot.i)}</div></div><div class="tile"><div class="k">Total ${isS?"sales":"purchases"}</div><div class="v">${money(tot.g)}</div></div></div>
-    <div class="row" style="justify-content:flex-end;margin-bottom:8px"><button class="btn sm" data-act="exportReport">Export CSV</button></div>
+    <div class="row" style="justify-content:flex-end;margin-bottom:8px">${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div>
     <div class="tablewrap">${rows.length?`<table><thead><tr><th>${isS?"Invoice no":"Bill no"}</th><th>Date</th><th>${isS?"Customer":"Vendor"}</th><th>GSTIN</th>${isS?"<th>Payment</th>":""}<th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th></tr></thead><tbody>${rows.map(({d,c,x})=>`<tr><td class="mono">${isS?`<button class="link" data-view-sale="${d.id}">${esc(d.no)}</button>`:esc(d.billNo)} ${x?'<span class="chip bad">Cancelled</span>':""}</td><td class="mono">${fmtDate(d.date)}</td><td>${esc(d.party?.name)}</td><td class="mono">${esc(d.party?.gstin||"—")}</td>${isS?`<td>${payChip(d)}</td>`:""}<td class="num">${amt(x?0:c.taxable)}</td><td class="num">${amt(x?0:c.cgst)}</td><td class="num">${amt(x?0:c.sgst)}</td><td class="num">${amt(x?0:c.igst)}</td><td class="num">${amt(x?0:c.grand)}</td></tr>`).join("")}</tbody><tfoot><tr><td colspan="${isS?5:4}">Total</td><td class="num">${amt(tot.tx)}</td><td class="num">${amt(tot.c)}</td><td class="num">${amt(tot.s)}</td><td class="num">${amt(tot.i)}</td><td class="num">${amt(tot.g)}</td></tr></tfoot></table>`:`<div class="empty"><b>Nothing in this period</b>Change the dates above.</div>`}</div>`;
   }
   else if(tab==="gstr1") body=gstr1();
@@ -1137,12 +1145,12 @@ function vReports(){
     const g={};for(const s of S.sales.filter(inRange))if(s.status!=="cancelled")for(const l of docCalc(s).lines){const k=l.itemId;(g[k]=g[k]||{name:l.name,sku:l.sku,hsn:l.hsn,unit:l.unit,q:0,tx:0,tax:0,t:0});g[k].q+=l.qty;g[k].tx+=l.taxable;g[k].tax+=l.cgst+l.sgst+l.igst;g[k].t+=l.total}
     const rows=Object.values(g).sort((a,b)=>b.tx-a.tx);
     sub._export=()=>[["SKU","Item","HSN","Unit","Qty sold","Taxable","GST","Total"],...rows.map(r=>[r.sku,r.name,r.hsn,r.unit,r.q,r2(r.tx),r2(r.tax),r2(r.t)])];sub._file=`item-wise-sales_${sub.from}_to_${sub.to}.csv`;
-    body=rangeFilters()+`<div class="row" style="justify-content:flex-end;margin-bottom:8px"><button class="btn sm" data-act="exportReport">Export CSV</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>SKU</th><th>Item</th><th>HSN</th><th class="num">Qty sold</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r.sku)}</td><td>${esc(r.name)}</td><td class="mono">${esc(r.hsn)}</td><td class="num">${qtyf(r.q)} ${esc(r.unit)}</td><td class="num">${amt(r.tx)}</td><td class="num">${amt(r.tax)}</td><td class="num">${amt(r.t)}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No sales in this period</b>Change the dates above.</div>`}</div>`;
+    body=rangeFilters()+`<div class="row" style="justify-content:flex-end;margin-bottom:8px">${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>SKU</th><th>Item</th><th>HSN</th><th class="num">Qty sold</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r.sku)}</td><td>${esc(r.name)}</td><td class="mono">${esc(r.hsn)}</td><td class="num">${qtyf(r.q)} ${esc(r.unit)}</td><td class="num">${amt(r.tx)}</td><td class="num">${amt(r.tax)}</td><td class="num">${amt(r.t)}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No sales in this period</b>Change the dates above.</div>`}</div>`;
   }
   else if(tab==="stock"){
     const rows=S.items.map(i=>[i,stockOf(i.id)]);
     sub._export=()=>[["SKU","Item","HSN","Unit","Opening","Purchased","Sold","Closing","Cost price","Stock value"],...rows.map(([i,s])=>[i.sku,i.name,i.hsn,i.unit,s.open,s.inQ,s.outQ,s.bal,num(i.purchasePrice),r2(s.bal*num(i.purchasePrice))])];sub._file=`stock-summary_${todayISO()}.csv`;
-    body=`<p class="muted">Current position across all dates. For live stock with status, see <button class="link" data-go="inventory">Inventory</button>.</p><div class="row" style="justify-content:flex-end;margin-bottom:8px"><button class="btn sm" data-act="exportReport">Export CSV</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>SKU</th><th>Item</th><th class="num">Opening</th><th class="num">In</th><th class="num">Out</th><th class="num">Closing</th><th class="num">Value at cost</th></tr></thead><tbody>${rows.map(([i,s])=>`<tr><td class="mono">${esc(i.sku)}</td><td>${esc(i.name)}</td><td class="num">${qtyf(s.open)}</td><td class="num">${qtyf(s.inQ)}</td><td class="num">${qtyf(s.outQ)}</td><td class="num">${qtyf(s.bal)}</td><td class="num">${amt(s.bal*num(i.purchasePrice))}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No items yet</b></div>`}</div>`;
+    body=`<p class="muted">Current position across all dates. For live stock with status, see <button class="link" data-go="inventory">Inventory</button>.</p><div class="row" style="justify-content:flex-end;margin-bottom:8px">${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>SKU</th><th>Item</th><th class="num">Opening</th><th class="num">In</th><th class="num">Out</th><th class="num">Closing</th><th class="num">Value at cost</th></tr></thead><tbody>${rows.map(([i,s])=>`<tr><td class="mono">${esc(i.sku)}</td><td>${esc(i.name)}</td><td class="num">${qtyf(s.open)}</td><td class="num">${qtyf(s.inQ)}</td><td class="num">${qtyf(s.outQ)}</td><td class="num">${qtyf(s.bal)}</td><td class="num">${amt(s.bal*num(i.purchasePrice))}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No items yet</b></div>`}</div>`;
   }
   return `<div class="head"><div><h1>Reports</h1><div class="sub">Filter by date, review, and export CSV for your accountant or the GST offline tool.</div></div></div><div class="tabs" role="tablist">${T}</div>${body}`;
 }
@@ -1176,7 +1184,7 @@ function gstr3b(){
     <div class="tile t-buy"><span class="ib">${ic("purchases")}</span><div class="k">Input tax credit</div><div class="v">${money(itc.i+itc.c+itc.s)}</div><div class="n">From registered vendors' bills</div></div>
     <div class="tile t-cash"><span class="ib">${ic("rupee")}</span><div class="k">GST payable in cash</div><div class="v">${money(cash)}</div><div class="n">IGST ${amt(pay.i)} · CGST ${amt(pay.c)} · SGST ${amt(pay.s)}</div></div>
     <div class="tile t-stock"><span class="ib">${ic("clock")}</span><div class="k">ITC carried forward</div><div class="v">${money(left.i+left.c+left.s)}</div><div class="n">Due: 20th of next month (monthly) · 22nd/24th (QRMP)</div></div></div>
-  <div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">3.1 Outward supplies</h3><button class="btn sm" data-act="exportReport">Export CSV</button></div>
+  <div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">3.1 Outward supplies</h3>${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div>
   <div class="tablewrap"><table><thead><tr><th>Nature of supplies</th>${TH}</tr></thead><tbody>
    ${row("(a) Outward taxable supplies (other than zero rated, nil rated and exempted)",out.tx,out.i,out.c,out.s)}${row("(b) Outward taxable supplies (zero rated)",0,0,0,0)}${row("(c) Other outward supplies (nil rated, exempted)",nil.tx,0,0,0)}${row("(d) Inward supplies (liable to reverse charge)",0,0,0,0)}${row("(e) Non-GST outward supplies",0,0,0,0)}</tbody></table></div>
   <h3 style="margin:18px 0 8px">3.2 Inter-state supplies to unregistered persons</h3>
@@ -1215,7 +1223,7 @@ function tdsReport(){
   sub._file=`TDS_Form140_FY${fy}-${String(fy+1).slice(2)}_${q}.csv`;
   return `<div class="filters"><label class="f"><span>Financial year</span><select class="input" id="tdsFY">${fyOptions(fy)}</select></label>
     <div class="seg" role="group" aria-label="Quarter">${QTRS.map(([k,l])=>`<button type="button" data-q4="${k}" aria-pressed="${k===q}">${k}<small>${l}</small></button>`).join("")}</div>
-    <div class="row" style="margin-left:auto"><button class="btn" data-act="newTds">${ic("plus")} Add TDS entry</button><button class="btn sm" data-act="exportReport">Export CSV</button></div></div>
+    <div class="row" style="margin-left:auto"><button class="btn" data-act="newTds">${ic("plus")} Add TDS entry</button>${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div></div>
   <div class="tiles">
    <div class="tile t-buy"><span class="ib">${ic("sales")}</span><div class="k">Entries this quarter</div><div class="v">${rows.length}</div><div class="n">${noPan?`<span style="color:var(--bad)">${noPan} without PAN</span>`:"All have PAN"}</div></div>
    <div class="tile t-sales"><span class="ib">${ic("rupee")}</span><div class="k">Amount paid / credited</div><div class="v">${money(tot.amt)}</div><div class="n">${Q[1]} ${q==="Q4"?fy+1:fy}</div></div>
@@ -1249,7 +1257,7 @@ function msmeReport(){
   sub._file=`MSME_dues_FY${fy}-${String(fy+1).slice(2)}_${h}.csv`;
   return `<div class="filters"><label class="f"><span>Financial year</span><select class="input" id="msFY">${fyOptions(fy)}</select></label>
     <div class="seg" role="group" aria-label="Half year"><button type="button" data-half="H1" aria-pressed="${h==="H1"}">Apr–Sep<small>Form 1 due 31 Oct</small></button><button type="button" data-half="H2" aria-pressed="${h==="H2"}">Oct–Mar<small>Form 1 due 30 Apr</small></button></div>
-    <div class="row" style="margin-left:auto"><button class="btn sm" data-act="exportReport">Export CSV</button></div></div>
+    <div class="row" style="margin-left:auto">${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div></div>
   ${msmeV.length?"":`<div class="banner">No vendors are marked Micro or Small yet. Open Vendors, edit a supplier and set their MSME category and Udyam number.</div>`}
   <div class="tiles">
    <div class="tile t-stock"><span class="ib">${ic("clock")}</span><div class="k">Outstanding past due</div><div class="v">${money(sum(od))}</div><div class="n">${od.length} ${od.length===1?"bill":"bills"} as of ${fmtDate(refDate)}</div></div>
@@ -1300,10 +1308,416 @@ function gstr1(){
   return rangeFilters()+(home?"":`<div class="banner">Set your business state in Settings; it decides intra- vs inter-state supplies.</div>`)+
   `<div class="tiles"><div class="tile"><div class="k">Taxable outward supplies</div><div class="v">${money(all.tx)}</div></div><div class="tile"><div class="k">IGST</div><div class="v">${money(all.i)}</div></div><div class="tile"><div class="k">CGST</div><div class="v">${money(all.c)}</div></div><div class="tile"><div class="k">SGST / UTGST</div><div class="v">${money(all.sg)}</div></div></div>
   <div class="tabs" role="tablist">${parts.map(([k,l])=>`<button role="tab" data-part="${k}" aria-selected="${part===k}">${l}</button>`).join("")}</div>
-  <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="hint">${{b2b:"Invoices to registered customers, one row per invoice and tax rate.",b2cl:"Inter-state invoices to unregistered buyers above ₹1,00,000.",b2cs:"Other sales to unregistered buyers, summarised by place of supply and rate.",hsn:"HSN-wise summary of outward supplies, split B2B and B2C.",docs:"Invoice number series issued in the period, with cancellations."}[part]}</span><button class="btn sm" data-act="exportReport">Export CSV</button></div>
+  <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="hint">${{b2b:"Invoices to registered customers, one row per invoice and tax rate.",b2cl:"Inter-state invoices to unregistered buyers above ₹1,00,000.",b2cs:"Other sales to unregistered buyers, summarised by place of supply and rate.",hsn:"HSN-wise summary of outward supplies, split B2B and B2C.",docs:"Invoice number series issued in the period, with cancellations."}[part]}</span>${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div>
   <div class="tablewrap">${tbl||`<div class="empty"><b>No entries in this section</b>Nothing for this period.</div>`}</div>
   <p class="hint" style="margin-top:10px">Column headings follow the GST offline tool templates. Check figures with your tax adviser before filing.</p>`;
 }
+
+/* ================= ACCOUNTS: double-entry books built from every transaction =================
+   Ledgers: system ledgers (cash, bank, sales, GST…), one ledger per customer and vendor, and user ledgers.
+   Postings are derived live from sales, receipts, purchases, payments, TDS and vouchers, so ledgers,
+   trial balance, P&L and balance sheet always agree. Stock is valued at weighted average cost. */
+const GROUPS=[
+  ["capital","Capital Account","L"],["reserves","Reserves & Surplus","L"],["loans","Loans (Liability)","L"],
+  ["creditors","Sundry Creditors","L"],["duties","Duties & Taxes","L"],["curliab","Current Liabilities & Provisions","L"],["suspense","Suspense Account","L"],
+  ["fixed","Fixed Assets","A"],["invest","Investments","A"],["debtors","Sundry Debtors","A"],["cash","Cash-in-Hand","A"],["bank","Bank Accounts","A"],
+  ["advances","Loans & Advances (Asset)","A"],["curassets","Other Current Assets","A"],
+  ["sales","Sales Accounts","I","trading"],["dirinc","Direct Incomes","I","trading"],["indinc","Indirect Incomes","I","pl"],
+  ["purchase","Purchase Accounts","E","trading"],["direxp","Direct Expenses","E","trading"],["indexp","Indirect Expenses","E","pl"],
+];
+const GRP=Object.fromEntries(GROUPS.map(([k,n,nat,pl])=>[k,{k,n,nat,pl}]));
+const SYS_LEDGERS=[["sys:cash","Cash","cash"],["sys:bank","Bank Account","bank"],["sys:capital","Capital Account","capital"],
+  ["sys:sales","Sales Account","sales"],["sys:purchase","Purchase Account","purchase"],
+  ["sys:ocgst","Output CGST","duties"],["sys:osgst","Output SGST","duties"],["sys:oigst","Output IGST","duties"],
+  ["sys:icgst","Input CGST","duties"],["sys:isgst","Input SGST","duties"],["sys:iigst","Input IGST","duties"],
+  ["sys:tds","TDS Payable","duties"],["sys:round","Round Off","indexp"],["sys:b2c","Walk-in Customers (B2C)","debtors"]];
+const EXP_PRESETS=[["Rent","indexp"],["Salaries & Wages","indexp"],["Electricity","indexp"],["Telephone & Internet","indexp"],["Shop Expenses","indexp"],
+  ["Printing & Stationery","indexp"],["Bank Charges","indexp"],["Repairs & Maintenance","indexp"],["Travelling & Conveyance","indexp"],["Freight Inward","direxp"],
+  ["Drawings","capital"],["Discount Received","indinc"],["Interest Received","indinc"]];
+const VTYPES=[["Expense","EXP"],["Payment","PMT"],["Receipt","RCT"],["Contra","CTR"],["Journal","JV"]];
+const sgn=o=>o?(o.openingType==="Cr"?-1:1)*num(o.opening):0;
+function allLedgers(){
+  const ov=Object.fromEntries(S.ledgers.map(l=>[l.id,l]));const out=[];
+  for(const [id,name,group] of SYS_LEDGERS)out.push({id,name:ov[id]?.name||name,group,opening:sgn(ov[id]),kind:"sys",doc:ov[id]});
+  for(const c of S.customers)out.push({id:"c:"+c.id,name:c.name,group:"debtors",opening:sgn(ov["c:"+c.id]),kind:"cust",doc:ov["c:"+c.id]});
+  for(const v of S.vendors)out.push({id:"v:"+v.id,name:v.name,group:"creditors",opening:sgn(ov["v:"+v.id]),kind:"vend",doc:ov["v:"+v.id]});
+  for(const l of S.ledgers)if(!/^(sys|c|v):/.test(l.id))out.push({id:l.id,name:l.name,group:l.group,opening:sgn(l),kind:"user",doc:l});
+  // parties referenced by bills but no longer in the masters keep a ledger named from the bill
+  const seen=new Set(out.map(l=>l.id));
+  for(const x of S.sales)if(x.partyId&&!seen.has("c:"+x.partyId)){seen.add("c:"+x.partyId);out.push({id:"c:"+x.partyId,name:x.party?.name||"Customer",group:"debtors",opening:sgn(ov["c:"+x.partyId]),kind:"cust",doc:ov["c:"+x.partyId]})}
+  for(const x of S.purchases)if(x.partyId&&!seen.has("v:"+x.partyId)){seen.add("v:"+x.partyId);out.push({id:"v:"+x.partyId,name:x.party?.name||"Vendor",group:"creditors",opening:sgn(ov["v:"+x.partyId]),kind:"vend",doc:ov["v:"+x.partyId]})}
+  return out;
+}
+const ledgerById=id=>allLedgers().find(l=>l.id===id);
+const cashBankLedgers=()=>allLedgers().filter(l=>l.group==="cash"||l.group==="bank");
+function buildPostings(){
+  const P=[],B=S.settings,upiL=B.upiLedger||"sys:bank",cardL=B.cardLedger||upiL;
+  const add=(date,type,no,narr,lines,link)=>{lines=lines.map(l=>({l:l.l,dr:r2(num(l.dr)),cr:r2(num(l.cr))})).filter(l=>l.dr>0.004||l.cr>0.004);if(lines.length&&date)P.push({date,type,no,narr,lines,link})};
+  for(const s of S.sales){if(s.status==="cancelled")continue;const c=docCalc(s),party=s.partyId?"c:"+s.partyId:"sys:b2c";
+    const L=[{l:party,dr:c.grand},{l:"sys:sales",cr:c.taxable},{l:"sys:ocgst",cr:c.cgst},{l:"sys:osgst",cr:c.sgst},{l:"sys:oigst",cr:c.igst}];
+    if(c.round>0)L.push({l:"sys:round",cr:c.round});else if(c.round<0)L.push({l:"sys:round",dr:-c.round});
+    add(s.date,"Sales",s.no,`Sales to ${s.party?.name||""}`,L,{kind:"sale",id:s.id});
+    const p=payInfo(s);
+    if(p.status==="paid"){const into=p.mode==="Cash"?"sys:cash":p.mode==="Card"?cardL:upiL;let d=s.paidAt?isoLocal(s.paidAt):s.date;if(d<s.date)d=s.date;
+      add(d,"Receipt",s.no,`${p.mode} received from ${s.party?.name||""}`,[{l:into,dr:c.grand},{l:party,cr:c.grand}],{kind:"sale",id:s.id})}}
+  for(const pu of S.purchases){const c=docCalc(pu),party="v:"+pu.partyId,reg=!!pu.party?.gstin;
+    const L=[{l:party,cr:c.grand}];
+    if(reg)L.push({l:"sys:purchase",dr:c.taxable},{l:"sys:icgst",dr:c.cgst},{l:"sys:isgst",dr:c.sgst},{l:"sys:iigst",dr:c.igst});
+    else L.push({l:"sys:purchase",dr:r2(c.taxable+c.tax)});
+    if(c.round>0)L.push({l:"sys:round",dr:c.round});else if(c.round<0)L.push({l:"sys:round",cr:-c.round});
+    add(pu.date,"Purchase",pu.billNo,`Purchase from ${pu.party?.name||""}`,L,{kind:"purchase",id:pu.id});
+    const td=S.tds.find(x=>x.purchaseId===pu.id),t=td?r2(num(td.tds)):0;
+    if(t>0)add(pu.date,"Journal",pu.billNo,`TDS deducted on bill ${pu.billNo}`,[{l:party,dr:t},{l:"sys:tds",cr:t}],{kind:"tds",id:td.id});
+    if(pu.paidOn)add(pu.paidOn,"Payment",pu.billNo,`Paid to ${pu.party?.name||""}`,[{l:party,dr:r2(c.grand-t)},{l:pu.paidFrom||"sys:bank",cr:r2(c.grand-t)}],{kind:"purchase",id:pu.id})}
+  for(const e of S.tds){const a=r2(num(e.amount)),t=r2(num(e.tds));
+    if(!e.purchaseId&&e.expLedger)add(e.date,"Payment","TDS",`${e.payee} · ${tdsSec(e.section).label}`,[{l:e.expLedger,dr:a},{l:"sys:tds",cr:t},{l:e.paidFrom||"sys:bank",cr:r2(a-t)}],{kind:"tds",id:e.id});
+    if(e.depDate&&t>0)add(e.depDate,"Payment","TDS",`TDS deposited · ${e.payee}${e.challan?" · challan "+e.challan:""}`,[{l:"sys:tds",dr:t},{l:e.depFrom||"sys:bank",cr:t}],{kind:"tds",id:e.id})}
+  for(const v of S.vouchers)add(v.date,v.type,v.no,v.narration||"",v.lines||[],{kind:"voucher",id:v.id});
+  P.sort((a,b)=>a.date.localeCompare(b.date));
+  return P;
+}
+/* stock value at a date: quantity on hand × weighted average purchase cost */
+function stockValueAt(date){
+  let v=0;
+  for(const it of S.items){let q=num(it.openingStock),cq=q,cost=q*num(it.purchasePrice);
+    for(const p of S.purchases)if(p.date<=date)for(const l of p.lines||[])if(l.itemId===it.id){const lq=num(l.qty);q+=lq;cq+=lq;cost+=lq*num(l.rate)*(1-num(l.disc)/100)}
+    for(const s of S.sales)if(s.status!=="cancelled"&&s.date<=date)for(const l of s.lines||[])if(l.itemId===it.id)q-=num(l.qty);
+    const avg=cq>0?cost/cq:num(it.purchasePrice);if(q>0)v+=q*avg}
+  return r2(v);
+}
+const dayBefore=iso=>addDays(iso,-1);
+/* period books: balance-sheet ledgers cumulative to T; P&L ledgers for F..T; prior P&L rolls into "Profit & Loss A/c" */
+function books(F,T){
+  const P=buildPostings(),L=allLedgers(),map={};
+  for(const l of L)map[l.id]={...l,open:0,dr:0,cr:0,close:0};
+  const get=id=>map[id]||(map[id]={id,name:"Unknown ledger "+id,group:"suspense",opening:0,kind:"lost",open:0,dr:0,cr:0,close:0});
+  let priorIE=0;
+  for(const l of Object.values(map))if(GRP[l.group]?.nat==="A"||GRP[l.group]?.nat==="L")l.open=l.opening;
+  for(const p of P)for(const x of p.lines){const l=get(x.l),nat=GRP[l.group]?.nat||"L",d=x.dr-x.cr;
+    if(p.date<F){if(nat==="I"||nat==="E")priorIE+=d;else l.open+=d}
+    else if(p.date<=T){l.dr+=x.dr;l.cr+=x.cr}}
+  for(const l of Object.values(map))l.close=r2(l.open+l.dr-l.cr);
+  const OS_init=stockValueAt("0000-01-01"),OS=stockValueAt(dayBefore(F)),CS=stockValueAt(T);
+  const P0=r2(-priorIE+OS-OS_init);
+  const list=Object.values(map);
+  const tbSum=r2(list.reduce((a,l)=>a+l.close,0)+OS-P0);
+  return {F,T,P,map,list,OS,CS,OS_init,P0,diff:tbSum};
+}
+function plFigures(bk){
+  const by=g=>bk.list.filter(l=>l.group===g&&Math.abs(l.close)>0.004);
+  const incAmt=l=>-l.close,expAmt=l=>l.close,tot=(arr,f)=>r2(arr.reduce((a,l)=>a+f(l),0));
+  const sales=by("sales"),dirinc=by("dirinc"),indinc=by("indinc"),purch=by("purchase"),direxp=by("direxp"),indexp=by("indexp");
+  const tradeCr=r2(tot(sales,incAmt)+tot(dirinc,incAmt)+bk.CS),tradeDr=r2(bk.OS+tot(purch,expAmt)+tot(direxp,expAmt));
+  const GP=r2(tradeCr-tradeDr),NP=r2(GP+tot(indinc,incAmt)-tot(indexp,expAmt));
+  return {sales,dirinc,indinc,purch,direxp,indexp,incAmt,expAmt,tot,GP,NP,tradeCr,tradeDr};
+}
+const balTxt=v=>Math.abs(v)<0.005?"0.00":`${amt(Math.abs(v))} ${v>0?"Dr":"Cr"}`;
+const neg=v=>v<0?`(${amt(-v)})`:amt(v);
+
+/* ---------- Accounts view ---------- */
+function acctRange(){
+  const t=todayISO();const from=sub.from||fyStart(t),to=sub.to||t;sub.from=from;sub.to=to;const fy=fyStartYear(to);
+  return `<div class="filters"><label class="f"><span>From</span><input class="input" type="date" id="rFrom" value="${from}"></label><label class="f"><span>To</span><input class="input" type="date" id="rTo" value="${to}"></label>
+   <div class="row"><button class="btn sm" data-range="${fyStart(t)},${t}">This FY</button><button class="btn sm" data-range="${fy-1}-04-01,${fy}-03-31">Previous FY</button><button class="btn sm" data-range="${monthRange(0).join(",")}">This month</button></div>
+   <div class="row" style="margin-left:auto">${expBtns()}</div></div>`;
+}
+const expBtns=()=>`<button class="btn sm" data-act="exportXlsx">${ic("sales")} Excel</button><button class="btn sm" data-act="exportPdf">${ic("sales")} PDF</button>`;
+function vAccounts(){
+  const tab=sub.atab||"ledgers";
+  const tabs=[["ledgers","Ledgers"],["vouchers","Vouchers & expenses"],["statement","Ledger statement"],["tb","Trial balance"],["pl","Profit & Loss"],["bs","Balance sheet"]];
+  let body="";
+  try{body=({ledgers:aLedgers,vouchers:aVouchers,statement:aStatement,tb:aTB,pl:aPL,bs:aBS}[tab]||aLedgers)()}catch(e){console.error(e);body=`<div class="banner">Could not build this report: ${esc(e.message)}</div>`}
+  return `<div class="head"><div><h1>Accounts</h1><div class="sub">Every sale, purchase, payment, TDS entry and voucher posts to the ledgers automatically, so the trial balance, P&amp;L and balance sheet always agree.</div></div>
+   <div class="row"><button class="btn" data-act="newLedger">${ic("plus")} Ledger</button><button class="btn pri" data-act="newVoucher" data-vt="Expense">${ic("plus")} Expense / voucher</button></div></div>
+  <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-atab="${k}" aria-selected="${tab===k}">${l}</button>`).join("")}</div>${body}`;
+}
+function aLedgers(){
+  const t=todayISO(),bk=books(fyStart(t),t),q=(sub.lq||"").toLowerCase();
+  const hasUser=S.ledgers.some(l=>!/^(sys|c|v):/.test(l.id));
+  const rows=GROUPS.map(([g,n,nat])=>{const ls=bk.list.filter(l=>l.group===g&&(!q||l.name.toLowerCase().includes(q))).sort((a,b)=>a.name.localeCompare(b.name));if(!ls.length)return "";
+    const tot=r2(ls.reduce((a,l)=>a+l.close,0));
+    return `<tr><td colspan="3" style="background:var(--sunk);font-weight:600">${esc(n)} <span class="chip">${{A:"Asset",L:"Liability",I:"Income",E:"Expense"}[nat]}</span></td><td class="num" style="background:var(--sunk);font-weight:600">${balTxt(tot)}</td><td style="background:var(--sunk)"></td></tr>`+
+      ls.map(l=>`<tr><td style="padding-left:26px">${esc(l.name)} ${l.kind==="sys"?'<span class="chip">Built-in</span>':l.kind==="cust"?'<span class="chip b2b">Customer</span>':l.kind==="vend"?'<span class="chip warn">Vendor</span>':""}</td><td class="num">${l.opening?balTxt(l.opening):""}</td><td class="num">${amt(l.dr)} / ${amt(l.cr)}</td><td class="num"><b>${balTxt(l.close)}</b></td><td><div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-stmt="${esc(l.id)}">Statement</button><button class="btn sm" data-edit-ledger="${esc(l.id)}">Edit</button></div></td></tr>`).join("")}).join("");
+  const banks=cashBankLedgers();
+  sub._exportDoc=()=>({title:"List of ledgers",subtitle:`Balances as at ${fmtDate(t)} (income and expense for FY to date)`,sheets:[{name:"Ledgers",head:["Ledger","Group","Opening","Debit","Credit","Closing","Dr/Cr"],
+    rows:bk.list.filter(l=>l.kind!=="lost").sort((a,b)=>GROUPS.findIndex(g=>g[0]===a.group)-GROUPS.findIndex(g=>g[0]===b.group)||a.name.localeCompare(b.name)).map(l=>[l.name,GRP[l.group].n,r2(l.opening),r2(l.dr),r2(l.cr),r2(Math.abs(l.close)),l.close>=0?"Dr":"Cr"])}]});
+  return `<div class="filters"><label class="f" style="width:260px"><span>Search ledgers</span><input class="input" id="ledQ" value="${esc(sub.lq||"")}" placeholder="Name"></label>
+    <label class="f" style="width:220px"><span>UPI receipts go to</span><select class="input" id="upiLed">${banks.map(b=>`<option value="${b.id}"${(S.settings.upiLedger||"sys:bank")===b.id?" selected":""}>${esc(b.name)}</option>`).join("")}</select></label>
+    <label class="f" style="width:220px"><span>Card receipts go to</span><select class="input" id="cardLed">${banks.map(b=>`<option value="${b.id}"${(S.settings.cardLedger||S.settings.upiLedger||"sys:bank")===b.id?" selected":""}>${esc(b.name)}</option>`).join("")}</select></label>
+    <div class="row" style="margin-left:auto">${hasUser?"":`<button class="btn sm" data-act="presetLedgers">${ic("plus")} Add common expense ledgers</button>`}<button class="btn sm" data-act="exportAllLedgers">${ic("sales")} All ledgers (Excel)</button>${expBtns()}</div></div>
+   <div class="tablewrap"><table><thead><tr><th>Ledger</th><th class="num">Opening</th><th class="num">Debit / Credit (FY)</th><th class="num">Closing</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+   <p class="hint" style="margin-top:10px">Customers and vendors get their own ledgers automatically. Set opening balances (for example capital, bank and cash on the day you start) with Edit.</p>`;
+}
+function openLedgerForm(id){
+  const ex=id?ledgerById(id):null,isSys=ex&&ex.kind!=="user",doc=ex?.doc||{};
+  openModal(id?`Edit ledger · ${ex.name}`:"Create ledger",`<div class="grid g2">
+   <label class="f req"><span>Ledger name</span><input class="input" id="lg_name" value="${esc(ex?.name||"")}"${ex&&ex.kind!=="user"&&ex.kind!=="sys"?" disabled":""}></label>
+   <label class="f req"><span>Under group</span><select class="input" id="lg_group"${isSys?" disabled":""}>${GROUPS.map(([k,n,nat])=>`<option value="${k}"${(ex?.group||"indexp")===k?" selected":""}>${esc(n)} (${{A:"Asset",L:"Liability",I:"Income",E:"Expense"}[nat]})</option>`).join("")}</select></label>
+   <label class="f"><span>Opening balance</span><input class="input mono" id="lg_open" type="number" step="0.01" min="0" value="${doc.opening??""}"></label>
+   <label class="f"><span>Dr / Cr</span><select class="input" id="lg_dc"><option${doc.openingType!=="Cr"?" selected":""}>Dr</option><option${doc.openingType==="Cr"?" selected":""}>Cr</option></select></label>
+   <label class="f spanall"><span>Notes (bank a/c no., IFSC, etc.)</span><input class="input" id="lg_notes" value="${esc(doc.notes||"")}"></label>
+  </div><p class="hint" style="margin-top:8px">Assets and expenses usually open Dr; capital, loans and suppliers open Cr. ${isSys?"Built-in and party ledgers keep their group; you can set the opening balance.":""}</p><div id="lgErr"></div>`,
+  `${ex&&ex.kind==="user"?`<button class="btn danger" id="lg_del" style="margin-right:auto">Delete</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="lg_save">${id?"Save":"Create ledger"}</button>`);
+  $("#lg_save").onclick=async()=>{const name=$("#lg_name").value.trim();
+    if(!isSys&&!name){$("#lgErr").innerHTML=`<div class="err">Enter a ledger name.</div>`;return}
+    if(!isSys&&allLedgers().some(l=>l.name.toLowerCase()===name.toLowerCase()&&l.id!==id)){$("#lgErr").innerHTML=`<div class="err">A ledger named ${esc(name)} already exists.</div>`;return}
+    const o={...doc,id:id||("L"+uid()),opening:num($("#lg_open").value),openingType:$("#lg_dc").value,notes:$("#lg_notes").value.trim()};
+    if(!isSys){o.name=name;o.group=$("#lg_group").value}else if(ex.kind==="sys"&&name)o.name=name;
+    await guard(()=>backend.put("ledgers",o));closeModal();toast(id?"Ledger saved":"Ledger created")};
+  if($("#lg_del"))$("#lg_del").onclick=()=>{const used=buildPostings().some(p=>p.lines.some(x=>x.l===id))||S.tds.some(e=>e.expLedger===id);
+    if(used){$("#lgErr").innerHTML=`<div class="err">This ledger has entries. Move or delete those vouchers first.</div>`;return}
+    confirmIn("#lgErr","Delete this ledger?",async()=>{await guard(()=>backend.remove("ledgers",id));closeModal();toast("Ledger deleted")})};
+}
+/* ---------- vouchers ---------- */
+function aVouchers(){
+  const rows=S.vouchers.filter(v=>v.date>=sub.from&&v.date<=sub.to).sort((a,b)=>b.date.localeCompare(a.date)||String(b.no).localeCompare(String(a.no)));
+  const nm=id=>ledgerById(id)?.name||id;
+  sub._exportDoc=()=>({title:"Vouchers",subtitle:`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`,sheets:[{name:"Vouchers",head:["Date","Voucher no","Type","Ledger","Debit","Credit","Narration"],
+    rows:rows.flatMap(v=>v.lines.map((x,i)=>[i?"":fmtDate(v.date),i?"":v.no,i?"":v.type,nm(x.l),num(x.dr)||"",num(x.cr)||"",i?"":v.narration||""]))}]});
+  return acctRange()+`<div class="row" style="margin-bottom:10px">${VTYPES.map(([t])=>`<button class="btn sm" data-act="newVoucher" data-vt="${t}">${ic("plus")} ${t}</button>`).join("")}</div>
+  <div class="tablewrap">${rows.length?`<table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="num">Amount</th><th>Narration</th><th></th></tr></thead><tbody>${rows.map(v=>{const dr=v.lines.filter(x=>num(x.dr)>0),cr=v.lines.filter(x=>num(x.cr)>0),tot=r2(dr.reduce((a,x)=>a+num(x.dr),0));
+    return `<tr><td class="mono">${fmtDate(v.date)}</td><td><span class="chip ${v.type==="Expense"?"warn":v.type==="Receipt"?"good":v.type==="Journal"?"b2b":""}">${esc(v.type)}</span><div class="hint mono">${esc(v.no)}</div></td><td>Dr ${dr.map(x=>esc(nm(x.l))).join(", ")}<div class="hint">Cr ${cr.map(x=>esc(nm(x.l))).join(", ")}</div></td><td class="num"><b>${amt(tot)}</b></td><td class="hint">${esc(v.narration||"")}</td><td><button class="btn sm" data-edit-voucher="${v.id}">Edit</button></td></tr>`}).join("")}</tbody></table>`:`<div class="empty"><b>No vouchers in this period</b>Record shop expenses (rent, salary, electricity), owner's capital, bank deposits and adjustments here. Sales, purchases and their payments post on their own.</div>`}</div>`;
+}
+function ledgerOpts(filter,sel){
+  const ls=allLedgers().filter(filter);
+  return GROUPS.map(([g,n])=>{const x=ls.filter(l=>l.group===g).sort((a,b)=>a.name.localeCompare(b.name));return x.length?`<optgroup label="${esc(n)}">${x.map(l=>`<option value="${esc(l.id)}"${l.id===sel?" selected":""}>${esc(l.name)}</option>`).join("")}</optgroup>`:""}).join("");
+}
+async function nextVoucherNo(type,date){
+  const pre=(VTYPES.find(v=>v[0]===type)||["","JV"])[1],fy=fyOf(date);
+  const n=S.vouchers.filter(v=>v.type===type&&fyOf(v.date)===fy).reduce((m,v)=>Math.max(m,num(String(v.no).split("/").pop())),0)+1;
+  return `${pre}/${fy}/${String(n).padStart(4,"0")}`;
+}
+function openVoucherForm(type,id){
+  const ex=id?byId("vouchers",id):null;type=ex?.type||type||"Expense";
+  const isCB=l=>l.group==="cash"||l.group==="bank",isExp=l=>GRP[l.group]?.nat==="E"||l.group==="fixed"||l.group==="capital";
+  const home=S.settings.state||"";
+  let body="";
+  const L0=ex?.lines||[];
+  const drL=L0.find(x=>num(x.dr)>0)?.l,crL=L0.find(x=>num(x.cr)>0)?.l,amt0=ex?r2(L0.filter(x=>num(x.dr)>0).reduce((a,x)=>a+num(x.dr),0)):"";
+  const common=`<label class="f req"><span>Date</span><input class="input" type="date" id="vc_date" value="${ex?.date||todayISO()}"></label>`;
+  if(type==="Expense"){
+    const expLine=L0.find(x=>num(x.dr)>0&&!/^sys:i(c|s|i)gst$/.test(x.l)),gstLines=L0.filter(x=>/^sys:i(c|s|i)gst$/.test(x.l));
+    const base=expLine?num(expLine.dr):"",gstAmt=r2(gstLines.reduce((a,x)=>a+num(x.dr),0));const rate=base&&gstAmt?Math.round(gstAmt/base*1000)/10:0;
+    body=`<div class="grid g2">${common}<label class="f req"><span>Expense ledger</span><div class="row" style="flex-wrap:nowrap"><select class="input" id="vc_exp"><option value="">Select</option>${ledgerOpts(isExp,expLine?.l)}</select><button class="btn sm" type="button" id="vc_newl">+ New</button></div></label>
+      <label class="f req"><span>Amount (before GST)</span><input class="input mono" id="vc_amt" type="number" step="0.01" min="0" value="${base}"></label>
+      <label class="f"><span>GST on this bill</span><select class="input" id="vc_gst">${[0,5,12,18,28].map(r=>`<option value="${r}"${r===rate?" selected":""}>${r?r+"% (claim input credit)":"No GST / not claimable"}</option>`).join("")}</select></label>
+      <label class="f req"><span>Paid from</span><select class="input" id="vc_cr">${ledgerOpts(l=>isCB(l)||l.group==="creditors"||l.group==="curliab",crL||"sys:cash")}</select></label>
+      <div class="f" id="vc_tot" style="justify-content:flex-end;font-size:13px;color:var(--muted)"></div></div>`;
+  }else if(type==="Journal"){
+    const lines=L0.length?L0:[{l:"",dr:"",cr:""},{l:"",dr:"",cr:""}];
+    body=`<div class="grid g2">${common}</div><div class="tablewrap" style="margin-top:12px"><table class="lines"><thead><tr><th>Ledger</th><th class="num">Debit</th><th class="num">Credit</th><th></th></tr></thead><tbody id="jv_rows">${lines.map(x=>jvRow(x)).join("")}</tbody>
+      <tfoot><tr><td><button class="btn sm" type="button" id="jv_add">+ Line</button></td><td class="num" id="jv_dr"></td><td class="num" id="jv_cr"></td><td></td></tr></tfoot></table></div>`;
+  }else{
+    const lab={Payment:["Paid to","Paid from"],Receipt:["Received into","Received from"],Contra:["Deposit into / withdraw to","From"]}[type];
+    const drF=type==="Receipt"||type==="Contra"?isCB:()=>true,crF=type==="Payment"||type==="Contra"?isCB:()=>true;
+    body=`<div class="grid g2">${common}<label class="f req"><span>Amount</span><input class="input mono" id="vc_amt" type="number" step="0.01" min="0" value="${amt0}"></label>
+      <label class="f req"><span>${lab[0]} (Dr)</span><select class="input" id="vc_dr"><option value="">Select</option>${ledgerOpts(drF,drL)}</select></label>
+      <label class="f req"><span>${lab[1]} (Cr)</span><select class="input" id="vc_cr"><option value="">Select</option>${ledgerOpts(crF,crL)}</select></label></div>`;
+  }
+  openModal(`${ex?"Edit":"New"} ${type.toLowerCase()} voucher${ex?" · "+ex.no:""}`,`${!ex?`<div class="seg" role="group" style="margin-bottom:14px">${VTYPES.map(([t])=>`<button type="button" data-vtsel="${t}" aria-pressed="${t===type}">${t}</button>`).join("")}</div>`:""}
+    ${body}<label class="f" style="margin-top:12px"><span>Narration</span><input class="input" id="vc_narr" value="${esc(ex?.narration||"")}" placeholder="e.g. Shop rent for October"></label><div id="vcErr"></div>`,
+    `${ex?`<button class="btn danger" id="vc_del" style="margin-right:auto">Delete</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="vc_save">${ex?"Save":"Save voucher"}</button>`,{wide:type==="Journal"});
+  $("#ov").querySelectorAll("[data-vtsel]").forEach(b=>b.onclick=()=>openVoucherForm(b.dataset.vtsel));
+  if($("#vc_newl"))$("#vc_newl").onclick=()=>openLedgerForm();
+  const err=m=>$("#vcErr").innerHTML=`<div class="err">${m}</div>`;
+  if(type==="Expense"){const upd=()=>{const b=num($("#vc_amt").value),g=num($("#vc_gst").value);$("#vc_tot").innerHTML=`Total paid <b style="color:var(--ink)">${money(r2(b+b*g/100))}</b>${g?` (GST ${money(r2(b*g/100))} as input credit)`:""}`};["vc_amt","vc_gst"].forEach(i=>$("#"+i).addEventListener("input",upd));upd()}
+  if(type==="Journal"){const tot=()=>{let d=0,c=0;$("#jv_rows").querySelectorAll("tr").forEach(tr=>{d+=num(tr.querySelector("[data-k=dr]").value);c+=num(tr.querySelector("[data-k=cr]").value)});$("#jv_dr").innerHTML=`<b>${amt(d)}</b>`;$("#jv_cr").innerHTML=`<b style="color:${Math.abs(d-c)<0.005?"var(--good)":"var(--bad)"}">${amt(c)}</b>`};
+    $("#jv_rows").addEventListener("input",tot);$("#jv_add").onclick=()=>{$("#jv_rows").insertAdjacentHTML("beforeend",jvRow({}));};$("#jv_rows").addEventListener("click",e=>{const d=e.target.closest("[data-jvdel]");if(d){d.closest("tr").remove();tot()}});tot()}
+  $("#vc_save").onclick=async()=>{
+    const date=$("#vc_date").value;if(!date)return err("Choose a date.");
+    let lines=[];
+    if(type==="Expense"){const exl=$("#vc_exp").value,b=r2(num($("#vc_amt").value)),g=num($("#vc_gst").value),cr=$("#vc_cr").value;
+      if(!exl)return err("Choose the expense ledger, or create one with + New.");if(b<=0)return err("Enter the amount.");
+      const tax=r2(b*g/100),inter=false;lines=[{l:exl,dr:b}];
+      if(tax>0){if(inter)lines.push({l:"sys:iigst",dr:tax});else{const c=r2(tax/2);lines.push({l:"sys:icgst",dr:c},{l:"sys:isgst",dr:r2(tax-c)})}}
+      lines.push({l:cr,cr:r2(b+tax)})}
+    else if(type==="Journal"){$("#jv_rows").querySelectorAll("tr").forEach(tr=>{const l=tr.querySelector("select").value,d=r2(num(tr.querySelector("[data-k=dr]").value)),c=r2(num(tr.querySelector("[data-k=cr]").value));if(l&&(d||c))lines.push({l,dr:d,cr:c})});
+      const d=r2(lines.reduce((a,x)=>a+x.dr,0)),c=r2(lines.reduce((a,x)=>a+x.cr,0));if(lines.length<2)return err("A journal needs at least two lines.");if(Math.abs(d-c)>0.004)return err(`Debit ${amt(d)} and credit ${amt(c)} must be equal.`)}
+    else{const a=r2(num($("#vc_amt").value)),dr=$("#vc_dr").value,cr=$("#vc_cr").value;if(a<=0)return err("Enter the amount.");if(!dr||!cr)return err("Choose both ledgers.");if(dr===cr)return err("Choose two different ledgers.");lines=[{l:dr,dr:a},{l:cr,cr:a}]}
+    const o={...(ex||{}),id:ex?.id||uid(),type,date,lines,narration:$("#vc_narr").value.trim()};
+    if(!ex||fyOf(ex.date)!==fyOf(date))o.no=await nextVoucherNo(type,date);
+    await guard(()=>backend.put("vouchers",o));closeModal();toast(`${type} voucher ${o.no} saved`)};
+  if($("#vc_del"))$("#vc_del").onclick=()=>confirmIn("#vcErr","Delete this voucher? Its postings are removed from all ledgers.",async()=>{await guard(()=>backend.remove("vouchers",ex.id));closeModal();toast("Voucher deleted")});
+}
+function jvRow(x){return `<tr><td><select class="input"><option value="">Select ledger</option>${ledgerOpts(()=>true,x.l)}</select></td><td><input class="input mono" data-k="dr" type="number" step="0.01" min="0" style="text-align:right" value="${num(x.dr)||""}"></td><td><input class="input mono" data-k="cr" type="number" step="0.01" min="0" style="text-align:right" value="${num(x.cr)||""}"></td><td><button class="x" type="button" data-jvdel aria-label="Remove line">×</button></td></tr>`}
+/* ---------- ledger statement ---------- */
+function ledgerStatement(id,F,T,P){
+  const l=ledgerById(id);if(!l)return null;const nat=GRP[l.group]?.nat;P=P||buildPostings();
+  let open=nat==="A"||nat==="L"?l.opening:0;const rows=[];
+  for(const p of P){const mine=p.lines.filter(x=>x.l===id);if(!mine.length)continue;const d=r2(mine.reduce((a,x)=>a+x.dr,0)),c=r2(mine.reduce((a,x)=>a+x.cr,0));
+    if(p.date<F){if(nat==="A"||nat==="L")open+=d-c;continue}if(p.date>T)continue;
+    const others=p.lines.filter(x=>x.l!==id).map(x=>ledgerById(x.l)?.name||x.l);rows.push({date:p.date,type:p.type,no:p.no,part:[...new Set(others)].slice(0,2).join(", ")+(new Set(others).size>2?" & more":""),narr:p.narr,dr:d,cr:c,link:p.link})}
+  let bal=r2(open);for(const r of rows){bal=r2(bal+r.dr-r.cr);r.bal=bal}
+  return {l,open:r2(open),rows,close:bal,dr:r2(rows.reduce((a,r)=>a+r.dr,0)),cr:r2(rows.reduce((a,r)=>a+r.cr,0))};
+}
+function stmtSheet(st,F,T){return {name:st.l.name.replace(/[\\\/\?\*\[\]:]/g," ").slice(0,31),head:["Date","Particulars","Voucher type","Voucher no","Narration","Debit","Credit","Balance","Dr/Cr"],
+  rows:[[fmtDate(F),"Opening balance","","","",st.open>0?st.open:"",st.open<0?-st.open:"",Math.abs(st.open),st.open>=0?"Dr":"Cr"],...st.rows.map(r=>[fmtDate(r.date),r.part,r.type,r.no,r.narr,r.dr||"",r.cr||"",Math.abs(r.bal),r.bal>=0?"Dr":"Cr"])],
+  foot:["","Closing balance","","","",st.dr,st.cr,Math.abs(st.close),st.close>=0?"Dr":"Cr"]}}
+function aStatement(){
+  const id=sub.lid||"sys:cash";const range=acctRange();const st=ledgerStatement(id,sub.from,sub.to);
+  if(!st)return range+`<div class="empty">Choose a ledger.</div>`;
+  sub._exportDoc=()=>({title:`Ledger: ${st.l.name}`,subtitle:`${GRP[st.l.group].n} · ${fmtDate(sub.from)} to ${fmtDate(sub.to)}`,sheets:[stmtSheet(st,sub.from,sub.to)]});
+  return `<div class="filters"><label class="f" style="width:340px"><span>Ledger</span><select class="input" id="stmtL">${ledgerOpts(()=>true,id)}</select></label></div>`+range+
+  `<div class="tiles plain" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="tile"><div class="k">Opening</div><div class="v">${balTxt(st.open)}</div></div><div class="tile"><div class="k">Total debit</div><div class="v">${amt(st.dr)}</div></div><div class="tile"><div class="k">Total credit</div><div class="v">${amt(st.cr)}</div></div><div class="tile"><div class="k">Closing</div><div class="v">${balTxt(st.close)}</div></div></div>
+  <div class="tablewrap"><table><thead><tr><th>Date</th><th>Particulars</th><th>Voucher</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead><tbody>
+   <tr><td class="mono">${fmtDate(sub.from)}</td><td><b>Opening balance</b></td><td></td><td class="num"></td><td class="num"></td><td class="num"><b>${balTxt(st.open)}</b></td></tr>
+   ${st.rows.map(r=>`<tr><td class="mono">${fmtDate(r.date)}</td><td>${esc(r.part)}<div class="hint">${esc(r.narr)}</div></td><td><span class="chip">${esc(r.type)}</span><div class="hint mono">${r.link?.kind==="sale"?`<button class="link" data-view-sale="${r.link.id}">${esc(r.no)}</button>`:esc(r.no)}</div></td><td class="num">${r.dr?amt(r.dr):""}</td><td class="num">${r.cr?amt(r.cr):""}</td><td class="num">${balTxt(r.bal)}</td></tr>`).join("")}
+  </tbody><tfoot><tr><td></td><td>Closing balance</td><td></td><td class="num">${amt(st.dr)}</td><td class="num">${amt(st.cr)}</td><td class="num">${balTxt(st.close)}</td></tr></tfoot></table></div>`;
+}
+/* ---------- trial balance ---------- */
+function tbRows(bk){
+  const out=[];
+  for(const [g,n] of GROUPS){const ls=bk.list.filter(l=>l.group===g&&Math.abs(l.close)>0.004).sort((a,b)=>a.name.localeCompare(b.name));if(!ls.length)continue;
+    out.push({group:n,ls})}
+  return out;
+}
+function aTB(){
+  const range=acctRange();const bk=books(sub.from,sub.to);const G=tbRows(bk);
+  let dr=0,cr=0;const line=(name,v)=>{if(v>=0)dr+=v;else cr+=-v};
+  for(const g of G)for(const l of g.ls)line(l.name,l.close);
+  if(bk.OS)line("Opening Stock",bk.OS);if(Math.abs(bk.P0)>0.004)line("P&L",-bk.P0);if(Math.abs(bk.diff)>0.004)line("Diff",-bk.diff);
+  dr=r2(dr);cr=r2(cr);
+  const sheetRows=[];for(const g of G){const t=r2(g.ls.reduce((a,l)=>a+l.close,0));sheetRows.push([g.group,"",t>0?t:"",t<0?-t:""]);for(const l of g.ls)sheetRows.push(["",l.name,l.close>0?l.close:"",l.close<0?-l.close:""])}
+  if(bk.OS)sheetRows.push(["Opening Stock","",bk.OS,""]);if(Math.abs(bk.P0)>0.004)sheetRows.push(["Profit & Loss A/c (previous periods)","",bk.P0<0?-bk.P0:"",bk.P0>0?bk.P0:""]);
+  if(Math.abs(bk.diff)>0.004)sheetRows.push(["Difference in opening balances","",bk.diff<0?-bk.diff:"",bk.diff>0?bk.diff:""]);
+  sub._exportDoc=()=>({title:"Trial Balance",subtitle:`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`,sheets:[{name:"Trial Balance",head:["Group","Ledger","Debit","Credit"],rows:sheetRows,foot:["Total","",dr,cr],bold:r=>sheetRows[r]&&sheetRows[r][1]===""}]});
+  return range+`<div class="row" style="margin-bottom:10px">${Math.abs(dr-cr)<0.01?`<span class="paid-stamp">${ic("check")} Debit equals credit · ${money(dr)}</span>`:`<span class="chip bad">Out by ${money(dr-cr)}</span>`}<span class="hint">Closing stock on ${fmtDate(sub.to)}: ${money(bk.CS)} (shown in P&amp;L and balance sheet)</span></div>
+  <div class="tablewrap"><table><thead><tr><th>Particulars</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead><tbody>
+  ${G.map(g=>{const t=r2(g.ls.reduce((a,l)=>a+l.close,0));return `<tr><td style="background:var(--sunk);font-weight:600">${esc(g.group)}</td><td class="num" style="background:var(--sunk);font-weight:600">${t>0?amt(t):""}</td><td class="num" style="background:var(--sunk);font-weight:600">${t<0?amt(-t):""}</td></tr>`+g.ls.map(l=>`<tr><td style="padding-left:26px"><button class="link" data-stmt="${esc(l.id)}">${esc(l.name)}</button></td><td class="num">${l.close>0?amt(l.close):""}</td><td class="num">${l.close<0?amt(-l.close):""}</td></tr>`).join("")}).join("")}
+  ${bk.OS?`<tr><td style="font-weight:600">Opening Stock</td><td class="num">${amt(bk.OS)}</td><td></td></tr>`:""}
+  ${Math.abs(bk.P0)>0.004?`<tr><td style="font-weight:600">Profit &amp; Loss A/c (previous periods)</td><td class="num">${bk.P0<0?amt(-bk.P0):""}</td><td class="num">${bk.P0>0?amt(bk.P0):""}</td></tr>`:""}
+  ${Math.abs(bk.diff)>0.004?`<tr><td style="font-weight:600;color:var(--warn)">Difference in opening balances</td><td class="num">${bk.diff<0?amt(-bk.diff):""}</td><td class="num">${bk.diff>0?amt(bk.diff):""}</td></tr>`:""}
+  </tbody><tfoot><tr><td>Grand total</td><td class="num">${amt(dr)}</td><td class="num">${amt(cr)}</td></tr></tfoot></table></div>
+  ${Math.abs(bk.diff)>0.004?`<p class="hint" style="margin-top:8px">The opening balances you entered (including opening stock of ${money(bk.OS_init)}) don't balance by ${money(Math.abs(bk.diff))}. Usually the owner's capital opening balance makes up the difference: set it in Ledgers → Capital Account → Edit.</p>`:""}`;
+}
+/* ---------- P&L (T-format) ---------- */
+function tSide(items){return items.filter(Boolean)}
+function tTable(left,right,lh,rh){
+  const n=Math.max(left.length,right.length),cell=(r,side)=>r?`<td style="${side==="r"?"border-left:2px solid var(--line);":""}${r.ind?"padding-left:28px;":""}${r.b?"font-weight:600;":""}${r.hl?"color:var(--accent);":""}">${r.link?`<button class="link" data-stmt="${esc(r.link)}">${esc(r.t)}</button>`:esc(r.t)}</td><td class="num" style="${r.b?"font-weight:600;":""}">${r.sub!=null?`<span class="muted">${neg(r.sub)}</span>`:""}</td><td class="num" style="${r.b?"font-weight:600;":""}${r.hl?"color:var(--accent);":""}">${r.v!=null?neg(r.v):""}</td>`:`<td${side==="r"?' style="border-left:2px solid var(--line)"':""}></td><td></td><td></td>`;
+  let h=`<div class="tablewrap"><table><thead><tr><th>${lh}</th><th></th><th class="num">Amount</th><th style="border-left:2px solid var(--line)">${rh}</th><th></th><th class="num">Amount</th></tr></thead><tbody>`;
+  for(let i=0;i<n;i++)h+=`<tr>${cell(left[i],"l")}${cell(right[i],"r")}</tr>`;
+  return h+`</tbody></table></div>`;
+}
+const tRowsToSheet=(left,right)=>{const n=Math.max(left.length,right.length),rows=[];for(let i=0;i<n;i++){const a=left[i],b=right[i];rows.push([a?(a.ind?"   ":"")+a.t:"",a?.sub??"",a?.v??"",b?(b.ind?"   ":"")+b.t:"",b?.sub??"",b?.v??""])}
+  rows.bold=(r,c)=>{const x=c<3?left[r]:right[r];return !!(x&&!x.ind)};return rows};
+function tSheet(name,head,L,R){const rows=tRowsToSheet(L,R);return {name,head,rows,bold:rows.bold}}
+function groupRows(ls,f,title){if(!ls.length)return [];const t=r2(ls.reduce((a,l)=>a+f(l),0));return [{t:title,v:t,b:1},...ls.map(l=>({t:l.name,sub:r2(f(l)),ind:1,link:l.id}))]}
+function plT(bk,pf){
+  const L=[],R=[];
+  L.push({t:"Opening Stock",v:bk.OS,b:1});L.push(...groupRows(pf.purch,pf.expAmt,"Purchase Accounts"));L.push(...groupRows(pf.direxp,pf.expAmt,"Direct Expenses"));
+  R.push(...groupRows(pf.sales,pf.incAmt,"Sales Accounts"));R.push(...groupRows(pf.dirinc,pf.incAmt,"Direct Incomes"));R.push({t:"Closing Stock",v:bk.CS,b:1});
+  if(pf.GP>=0)L.push({t:"Gross Profit c/o",v:pf.GP,b:1,hl:1});else R.push({t:"Gross Loss c/o",v:-pf.GP,b:1,hl:1});
+  const n=Math.max(L.length,R.length);while(L.length<n)L.push(null);while(R.length<n)R.push(null);
+  const tradeTot=r2(Math.max(pf.tradeDr+Math.max(pf.GP,0),pf.tradeCr+Math.max(-pf.GP,0)));
+  L.push({t:"Total",v:tradeTot,b:1});R.push({t:"Total",v:tradeTot,b:1});
+  const L2=[],R2=[];
+  if(pf.GP<0)L2.push({t:"Gross Loss b/f",v:-pf.GP,b:1});else R2.push({t:"Gross Profit b/f",v:pf.GP,b:1});
+  L2.push(...groupRows(pf.indexp,pf.expAmt,"Indirect Expenses"));R2.push(...groupRows(pf.indinc,pf.incAmt,"Indirect Incomes"));
+  if(pf.NP>=0)L2.push({t:"Net Profit",v:pf.NP,b:1,hl:1});else R2.push({t:"Net Loss",v:-pf.NP,b:1,hl:1});
+  const n2=Math.max(L2.length,R2.length);while(L2.length<n2)L2.push(null);while(R2.length<n2)R2.push(null);
+  const t2=r2(Math.max(pf.GP,0)+pf.tot(pf.indinc,pf.incAmt)+Math.max(-pf.NP,0));
+  L2.push({t:"Total",v:t2,b:1});R2.push({t:"Total",v:t2,b:1});
+  return {L,R,L2,R2};
+}
+function aPL(){
+  const range=acctRange();const bk=books(sub.from,sub.to),pf=plFigures(bk),t=plT(bk,pf);
+  sub._exportDoc=()=>({title:"Profit & Loss Account",subtitle:`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`,landscape:true,sheets:[
+    tSheet("Trading Account",["Particulars (Dr)","","Amount","Particulars (Cr)","","Amount"],t.L,t.R),
+    tSheet("Profit & Loss",["Particulars (Dr)","","Amount","Particulars (Cr)","","Amount"],t.L2,t.R2)]});
+  const sales=pf.tot(pf.sales,pf.incAmt);
+  return range+`<div class="tiles">
+    <div class="tile t-sales"><span class="ib">${ic("sales")}</span><div class="k">Sales (net of GST)</div><div class="v">${money(sales)}</div><div class="n">${fmtDate(sub.from)} – ${fmtDate(sub.to)}</div></div>
+    <div class="tile t-buy"><span class="ib">${ic("inventory")}</span><div class="k">Cost of goods sold</div><div class="v">${money(r2(bk.OS+pf.tot(pf.purch,pf.expAmt)+pf.tot(pf.direxp,pf.expAmt)-bk.CS))}</div><div class="n">Opening ${amt(bk.OS)} · closing ${amt(bk.CS)}</div></div>
+    <div class="tile t-stock"><span class="ib">${ic("reports")}</span><div class="k">Gross profit</div><div class="v">${money(pf.GP)}</div><div class="n">${sales?((pf.GP/sales)*100).toFixed(1)+"% margin":""}</div></div>
+    <div class="tile t-cash"><span class="ib">${ic("rupee")}</span><div class="k">Net ${pf.NP>=0?"profit":"loss"}</div><div class="v" style="color:${pf.NP>=0?"var(--good)":"var(--bad)"}">${money(Math.abs(pf.NP))}</div><div class="n">After expenses ${amt(pf.tot(pf.indexp,pf.expAmt))}</div></div></div>
+  <h3>Trading account</h3>${tTable(t.L,t.R,"Dr","Cr")}<h3 style="margin-top:18px">Profit &amp; loss account</h3>${tTable(t.L2,t.R2,"Dr","Cr")}
+  <p class="hint" style="margin-top:8px">Stock is valued at weighted average purchase cost. Sales and purchases are shown without GST; GST sits in the Duties &amp; Taxes ledgers.</p>`;
+}
+/* ---------- balance sheet ---------- */
+function bsData(bk,pf){
+  const by=g=>bk.list.filter(l=>l.group===g&&Math.abs(l.close)>0.004).sort((a,b)=>a.name.localeCompare(b.name));
+  const cr=l=>-l.close,dr=l=>l.close;
+  const L=[],A=[];
+  const cap=by("capital");const capTot=r2(cap.reduce((a,l)=>a+cr(l),0));
+  L.push({t:"Capital Account",v:capTot,b:1},...cap.map(l=>({t:l.name,sub:r2(cr(l)),ind:1,link:l.id})));
+  const plTot=r2(bk.P0+pf.NP);
+  L.push({t:"Profit & Loss A/c",v:plTot,b:1},{t:"Opening balance",sub:bk.P0,ind:1},{t:"Current period",sub:pf.NP,ind:1});
+  for(const g of ["reserves","loans","creditors","curliab","suspense"])L.push(...groupRows(by(g),cr,GRP[g].n));
+  const duties=by("duties"),dCr=duties.filter(l=>l.close<0),dDr=duties.filter(l=>l.close>0);
+  L.push(...groupRows(dCr,cr,"Duties & Taxes (payable)"));
+  if(Math.abs(bk.diff)>0.004&&bk.diff>0)L.push({t:"Difference in opening balances",v:bk.diff,b:1});
+  for(const g of ["fixed","invest"])A.push(...groupRows(by(g),dr,GRP[g].n));
+  A.push({t:"Closing Stock",v:bk.CS,b:1});
+  for(const g of ["debtors","cash","bank","advances","curassets"])A.push(...groupRows(by(g),dr,GRP[g].n));
+  A.push(...groupRows(dDr,dr,"Duties & Taxes (input credit)"));
+  if(Math.abs(bk.diff)>0.004&&bk.diff<0)A.push({t:"Difference in opening balances",v:-bk.diff,b:1});
+  const tl=r2(L.reduce((a,r)=>a+(r&&r.v!=null&&!r.ind?r.v:0),0)),ta=r2(A.reduce((a,r)=>a+(r&&r.v!=null&&!r.ind?r.v:0),0));
+  return {L,A,tl,ta};
+}
+function aBS(){
+  const t=todayISO();const asAt=sub.to||t;const F=fyStart(asAt);sub.from=F;sub.to=asAt;
+  const bk=books(F,asAt),pf=plFigures(bk),d=bsData(bk,pf);
+  const L=[...d.L],A=[...d.A];const n=Math.max(L.length,A.length);while(L.length<n)L.push(null);while(A.length<n)A.push(null);
+  L.push({t:"Total",v:d.tl,b:1});A.push({t:"Total",v:d.ta,b:1});
+  sub._exportDoc=()=>({title:"Balance Sheet",subtitle:`As at ${fmtDate(asAt)}`,landscape:true,sheets:[tSheet("Balance Sheet",["Liabilities","","Amount","Assets","","Amount"],L,A)]});
+  return `<div class="filters"><label class="f"><span>As at</span><input class="input" type="date" id="rTo" value="${asAt}"></label>
+    <div class="row"><button class="btn sm" data-range="${F},${t}">Today</button><button class="btn sm" data-range="${fyStartYear(t)-1}-04-01,${fyStartYear(t)}-03-31">31 Mar ${fyStartYear(t)}</button></div><div class="row" style="margin-left:auto">${expBtns()}</div></div>
+  <div class="row" style="margin-bottom:10px">${Math.abs(d.tl-d.ta)<0.01?`<span class="paid-stamp">${ic("check")} Balanced · ${money(d.ta)}</span>`:`<span class="chip bad">Out by ${money(d.tl-d.ta)}</span>`}<span class="hint">Net ${pf.NP>=0?"profit":"loss"} for ${fmtDate(F)} – ${fmtDate(asAt)}: ${money(Math.abs(pf.NP))}</span></div>
+  ${tTable(L,A,"Liabilities","Assets")}`;
+}
+/* ---------- export: Excel (SheetJS) and PDF (jsPDF) ---------- */
+let xlsxP=null;
+function loadXlsx(){if(window.XLSX)return Promise.resolve();if(!xlsxP)xlsxP=loadScript("vendor/xlsx.full.min.js").catch(()=>loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js")).catch(e=>{xlsxP=null;throw e});return xlsxP}
+const fileSafe=s=>String(s).replace(/[\\\/:*?"<>|&]/g,"-").replace(/\s+/g,"_");
+async function exportXlsx(doc){
+  try{await loadXlsx()}catch(e){toast("Excel export needs the app files; try again");return}
+  const B=S.settings,wb=XLSX.utils.book_new(),used=new Set();
+  for(const sh of doc.sheets){
+    const aoa=[[B.name||"Ledgerbook"],[doc.title],[doc.subtitle||""],[],sh.head,...sh.rows,...(sh.foot?[sh.foot]:[])];
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    const cols=sh.head.map((h,i)=>({wch:Math.min(48,Math.max(10,String(h).length+2,...[...sh.rows,sh.foot||[]].map(r=>String(r?.[i]??"").length+2)))}));ws["!cols"]=cols;
+    const range=XLSX.utils.decode_range(ws["!ref"]);for(let R=5;R<=range.e.r;R++)for(let C=0;C<=range.e.c;C++){const c=ws[XLSX.utils.encode_cell({r:R,c:C})];if(c&&c.t==="n")c.z="#,##0.00"}
+    let nm=(sh.name||"Sheet").replace(/[\\\/\?\*\[\]:]/g," ").slice(0,31),k=2;while(used.has(nm.toLowerCase()))nm=nm.slice(0,28)+" "+k++;used.add(nm.toLowerCase());
+    XLSX.utils.book_append_sheet(wb,ws,nm)}
+  const out=XLSX.write(wb,{bookType:"xlsx",type:"array"});
+  await saveFile(`${fileSafe(doc.title)}_${todayISO()}.xlsx`,new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+}
+async function exportPdf(doc){
+  try{await loadPdfLib()}catch(e){toast("PDF export needs the app files; try again");return}
+  const {jsPDF}=window.jspdf,B=S.settings,land=doc.landscape||doc.sheets.some(s=>s.head.length>7);
+  const pdf=new jsPDF({unit:"mm",format:"a4",orientation:land?"landscape":"portrait"}),W=pdf.internal.pageSize.getWidth(),M=12;
+  const fmt=v=>typeof v==="number"?inr.format(v):String(v??"");
+  pdf.setFillColor(10,74,67);pdf.rect(0,0,W,4,"F");
+  pdf.setFont("helvetica","bold");pdf.setFontSize(14);pdf.text(B.name||"Ledgerbook",M,13);
+  pdf.setFont("helvetica","normal");pdf.setFontSize(8.5);pdf.text([[B.address,STATE_NAME[B.state]].filter(Boolean).join(", "),B.gstin?"GSTIN: "+B.gstin:""].filter(Boolean),M,18);
+  pdf.setFont("helvetica","bold");pdf.setFontSize(13);pdf.setTextColor(10,74,67);pdf.text(doc.title,W-M,13,{align:"right"});pdf.setTextColor(0);
+  pdf.setFont("helvetica","normal");pdf.setFontSize(9);pdf.text(doc.subtitle||"",W-M,18.5,{align:"right"});
+  let y=26;
+  for(const sh of doc.sheets){
+    if(doc.sheets.length>1){if(y>pdf.internal.pageSize.getHeight()-30){pdf.addPage();y=16}pdf.setFont("helvetica","bold");pdf.setFontSize(10.5);pdf.text(sh.name,M,y);y+=3}
+    const numCols=new Set();sh.head.forEach((h,i)=>{if(sh.rows.some(r=>typeof r[i]==="number"))numCols.add(i)});
+    const cs={};numCols.forEach(i=>cs[i]={halign:"right"});
+    pdf.autoTable({startY:y,margin:{left:M,right:M},head:[sh.head],body:sh.rows.map(r=>r.map(fmt)),foot:sh.foot?[sh.foot.map(fmt)]:undefined,showFoot:"lastPage",theme:"grid",
+      styles:{fontSize:land?7.8:8.2,cellPadding:1.6,lineColor:[205,214,211],textColor:20},headStyles:{fillColor:[10,74,67],textColor:255,fontStyle:"bold"},footStyles:{fillColor:[233,242,239],textColor:20,fontStyle:"bold"},columnStyles:cs,
+      didParseCell:d=>{if(d.section==="body"&&sh.bold&&sh.bold(d.row.index,d.column.index))d.cell.styles.fontStyle="bold";if(d.section==="body"&&typeof sh.rows[d.row.index]?.[d.column.index]==="number"&&sh.rows[d.row.index][d.column.index]<0)d.cell.styles.textColor=[176,40,31]}});
+    y=pdf.lastAutoTable.finalY+8}
+  const pages=pdf.internal.getNumberOfPages();for(let i=1;i<=pages;i++){pdf.setPage(i);pdf.setFontSize(7.5);pdf.setTextColor(120);pdf.text(`Generated by Ledgerbook on ${fmtDate(todayISO())}`,M,pdf.internal.pageSize.getHeight()-6);pdf.text(`Page ${i} of ${pages}`,W-M,pdf.internal.pageSize.getHeight()-6,{align:"right"});pdf.setTextColor(0)}
+  await saveFile(`${fileSafe(doc.title)}_${todayISO()}.pdf`,pdf.output("blob"),"application/pdf");
+}
+/* reports tab export: from sub._exportDoc, or the CSV row set (first row = header) */
+function currentExportDoc(){
+  if(sub._exportDoc)return sub._exportDoc();
+  if(sub._export){const rows=sub._export();const title=(sub._file||"Report").replace(/\.csv$/,"").replace(/_/g," ");return {title,subtitle:sub.from&&sub.to?`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`:"",sheets:[{name:title.slice(0,31),head:rows[0].map(String),rows:rows.slice(1)}]}}
+  return null;
+}
+async function exportAllLedgers(){
+  const t=todayISO(),F=fyStart(t),P=buildPostings();
+  const sts=allLedgers().map(l=>ledgerStatement(l.id,F,t,P)).filter(st=>st&&(st.rows.length||Math.abs(st.open)>0.004));
+  if(!sts.length){toast("No ledger has entries yet");return}
+  await exportXlsx({title:"All ledgers",subtitle:`${fmtDate(F)} to ${fmtDate(t)}`,sheets:sts.map(st=>stmtSheet(st,F,t))});
+}
+
+const isoLocal=ts=>{const d=new Date(ts);return isNaN(d)?"":new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10)};
 
 /* ---------- Settings ---------- */
 function vSettings(){
@@ -1368,6 +1782,9 @@ function bindView(){
   const m=$("#main");
   const debounce=(id,key)=>{const el=$(id);if(!el)return;el.addEventListener("input",()=>{sub[key]=el.value;clearTimeout(el._t);el._t=setTimeout(()=>{const pos=el.selectionStart;renderView();const n=$(id);if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}},180)})};
   debounce("#itemQ","q");debounce("#invQ","q");debounce("#partyQ","q");debounce("#saleQ","q");debounce("#purQ","q");
+  {const el=$("#ledQ");if(el)el.addEventListener("input",()=>{sub.lq=el.value;clearTimeout(el._t);el._t=setTimeout(()=>{const pos=el.selectionStart;renderView();const n=$("#ledQ");if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}},200)})}
+  {const el=$("#stmtL");if(el)el.addEventListener("change",()=>{sub.lid=el.value;renderView()})}
+  for(const [id,k] of [["#upiLed","upiLedger"],["#cardLed","cardLedger"]]){const el=$(id);if(el)el.addEventListener("change",async()=>{await guard(()=>backend.saveSettings({...S.settings,[k]:el.value}));toast("Saved")})}
   for(const id of ["#tdsFY","#msFY"]){const el=$(id);if(el)el.addEventListener("change",()=>{sub.fy=+el.value;renderView()})}
   for(const [id,k] of [["#sFrom","from"],["#sTo","to"],["#rFrom","from"],["#rTo","to"]]){const el=$(id);if(el)el.addEventListener("change",()=>{sub[k]=el.value;renderView()})}
   if($("#saveSettings"))$("#saveSettings").onclick=async()=>{
@@ -1406,6 +1823,10 @@ $("#main").addEventListener("click",async e=>{
   if(t.dataset.q4){sub.q4=t.dataset.q4;return renderView()}
   if(t.dataset.half){sub.half=t.dataset.half;return renderView()}
   if(t.dataset.editTds)return openTdsForm(t.dataset.editTds);
+  if(t.dataset.atab){sub={atab:t.dataset.atab,from:sub.from,to:sub.to,lid:sub.lid};return renderView()}
+  if(t.dataset.stmt){if(view!=="accounts")go("accounts");sub.atab="statement";sub.lid=t.dataset.stmt;return renderView()}
+  if(t.dataset.editLedger)return openLedgerForm(t.dataset.editLedger);
+  if(t.dataset.editVoucher)return openVoucherForm(null,t.dataset.editVoucher);
   if(t.dataset.payPur){const pu=byId("purchases",t.dataset.payPur);if(pu){await guard(()=>backend.put("purchases",{...pu,paidOn:todayISO()}));toast(`Bill ${pu.billNo} marked paid today`)}return}
   if(t.dataset.range){const [a,b]=t.dataset.range.split(",");sub.from=a;sub.to=b;return renderView()}
   if(t.dataset.editItem)return openItemForm(t.dataset.editItem);
@@ -1419,9 +1840,14 @@ $("#main").addEventListener("click",async e=>{
   if(a==="newCustomer")openPartyForm("customers");
   if(a==="newVendor")openPartyForm("vendors");
   if(a==="newTds")openTdsForm();
+  if(a==="newLedger")openLedgerForm();
+  if(a==="newVoucher")openVoucherForm(t.dataset.vt||"Expense");
+  if(a==="exportXlsx"||a==="exportPdf"){const d=currentExportDoc();if(!d){toast("Nothing to export here");return}return a==="exportXlsx"?exportXlsx(d):exportPdf(d)}
+  if(a==="exportAllLedgers")return exportAllLedgers();
+  if(a==="presetLedgers"){const have=new Set(allLedgers().map(l=>l.name.toLowerCase()));for(const [n,g] of EXP_PRESETS)if(!have.has(n.toLowerCase()))await guard(()=>backend.put("ledgers",{id:"L"+uid(),name:n,group:g,opening:0,openingType:"Dr"}));toast("Common ledgers added");return}
   if(a==="exportReport"&&sub._export)saveFile(sub._file,csv(sub._export()),"text/csv");
   if(a==="exportStock")saveFile(`stock_${todayISO()}.csv`,csv([["SKU","Item","HSN","Unit","Opening","Purchased","Sold","In stock","Value at cost"],...S.items.map(i=>{const s=stockOf(i.id);return [i.sku,i.name,i.hsn,i.unit,s.open,s.inQ,s.outQ,s.bal,r2(s.bal*num(i.purchasePrice))]})]),"text/csv");
-  if(a==="backup"){const counters={};for(const s of S.sales)counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));saveFile(`ledgerbook-backup_${todayISO()}.json`,JSON.stringify({app:"ledgerbook",v:1,at:new Date().toISOString(),settings:S.settings,counters:{...counters,...S.counters},items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds},null,1),"application/json")}
+  if(a==="backup"){const counters={};for(const s of S.sales)counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));saveFile(`ledgerbook-backup_${todayISO()}.json`,JSON.stringify({app:"ledgerbook",v:1,at:new Date().toISOString(),settings:S.settings,counters:{...counters,...S.counters},items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers},null,1),"application/json")}
   if(a==="clearSample"){confirmIn("#dataMsg","Remove every record marked Sample? Real records stay.",async()=>{
     for(const c of COLLS)for(const o of S[c].filter(x=>x.sample))await backend.remove(c,o.id);
     const counters={};for(const s of S.sales.filter(x=>!x.sample))counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));
