@@ -1,4 +1,6 @@
-# Ledgerbook: GST billing for Android tablets
+# Ledgerbook: GST billing for Android tablets and Windows PCs
+
+Developed by **Sourabh Tilawat**.
 
 An offline Android app for small shops. It covers items with HSN codes, customers and vendors,
 purchases that add stock, live inventory, GST sales invoices numbered in sequence, and reports
@@ -60,3 +62,11 @@ Edit `app/src/main/assets/www/index.html`, raise `versionCode` (and `versionName
 `app/build.gradle`, then upload the changes. A new APK is built automatically. If you change the
 web version (`ledgerbook.html`), rebuild the page with
 `python3 tools/build_index.py web/ledgerbook.html`.
+
+## Windows app (EXE)
+
+The same workflow builds `Ledgerbook-Setup-<version>.exe` on a Windows machine and saves it to the
+`builds-exe` branch. The installer is not code-signed, so Windows SmartScreen may say "Windows
+protected your PC". Click **More info → Run anyway**. Data is kept on that PC (back up from Settings).
+Invoices are saved to *Downloads\\Ledgerbook*. *Send on WhatsApp* opens the customer's chat with the
+message typed and opens the folder holding the PDF, so you can drag the PDF into the chat.

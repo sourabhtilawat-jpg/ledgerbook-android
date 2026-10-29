@@ -1,4 +1,4 @@
-name: Build Ledgerbook APK
+name: Build Ledgerbook (Android APK + Windows EXE)
 
 on:
   push:
@@ -72,3 +72,35 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: out/*.apk
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Build Windows installer
+        working-directory: desktop
+        run: |
+          rm -rf www && cp -r ../app/src/main/assets/www www
+          npm install --no-audit --no-fund
+          npx electron-builder --win nsis --x64 --publish never
+          ls -la dist
+
+      - name: Save installer to the 'builds-exe' branch
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir out && cp desktop/dist/Ledgerbook-Setup-*.exe out/
+          cd out
+          git init -q -b builds-exe
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Windows installer from ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" builds-exe

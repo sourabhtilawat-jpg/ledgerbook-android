@@ -59,6 +59,8 @@ svg.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;str
 .store{margin-top:auto;padding:12px 6px 0;font-size:12px;color:var(--brand-muted);display:flex;gap:8px;align-items:flex-start}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--brand-muted);flex:none;margin-top:5px}
 .dot.ok{background:#5BD99B} .dot.local{background:var(--saffron)}
+.credit{padding:10px 6px 0;margin-top:10px;border-top:1px solid var(--brand-line);font-size:11.5px;color:var(--brand-muted)}
+.credit b{color:var(--brand-ink);font-weight:600}
 /* work area */
 .work{min-width:0;display:flex;flex-direction:column}
 .topbar{position:sticky;top:0;z-index:15;background:color-mix(in srgb, var(--surface) 92%, transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding-block:10px;padding-left:28px;padding-right:max(28px, env(safe-area-inset-right, 0px))}
@@ -201,7 +203,7 @@ legend{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
   .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto 1fr}
   .side{position:sticky;top:env(safe-area-inset-top,0px);height:auto;z-index:20;padding-block:10px;padding-right:max(14px, env(safe-area-inset-right, 0px));flex-direction:column;gap:8px}
   body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:30;background:var(--brand)}
-  .biz,.store,.nav kbd,.nav .sep{display:none}
+  .biz,.store,.credit,.nav kbd,.nav .sep{display:none}
   .nav{flex-direction:row;overflow-x:auto;gap:4px}
   .nav button{white-space:nowrap;padding:7px 10px}
   .nav button[aria-current="page"]::before{left:10px;right:10px;top:auto;bottom:0;width:auto;height:3px;border-radius:3px 3px 0 0}
@@ -218,6 +220,7 @@ legend{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
     <div class="biz" id="bizName">Loading…</div>
     <nav class="nav" id="nav" aria-label="Sections"></nav>
     <div class="store"><span class="dot" id="storeDot"></span><span id="storeText">Connecting to storage…</span></div>
+    <div class="credit">Developed by <b>Sourabh Tilawat</b></div>
   </aside>
   <div class="work">
     <div class="topbar" id="topbar"></div>
@@ -233,7 +236,27 @@ const STATES=[["01","Jammu & Kashmir"],["02","Himachal Pradesh"],["03","Punjab"]
 const STATE_NAME=Object.fromEntries(STATES);
 const GST_RATES=[0,0.25,3,5,12,18,28,40];
 const UNITS=["PCS","NOS","BOX","BAG","KGS","GMS","LTR","MTR","SET","PAC","DOZ","BTL","ROL","SQM"];
-const COLLS=["items","customers","vendors","purchases","sales"];
+const COLLS=["items","customers","vendors","purchases","sales","tds"];
+const APP_VERSION="1.2";
+const DEVELOPER="Sourabh Tilawat";
+/* TDS on resident payments under section 393(1), Income-tax Act 2025 (from 1 Apr 2026). Old 1961-Act section shown for familiarity.
+   Rates per published FY 2026-27 rate charts; payment codes are left for the user because published code lists differ. */
+const TDS_SEC=[
+  {k:"194C-ind",label:"Contractor: individual / HUF",old:"194C",rate:1,thr:"₹30,000 per bill or ₹1,00,000 in the year"},
+  {k:"194C-oth",label:"Contractor: firm / company",old:"194C",rate:2,thr:"₹30,000 per bill or ₹1,00,000 in the year"},
+  {k:"194J-prof",label:"Professional fees",old:"194J",rate:10,thr:"₹50,000 in the year"},
+  {k:"194J-tech",label:"Technical services",old:"194J",rate:2,thr:"₹50,000 in the year"},
+  {k:"194I-bld",label:"Rent: land, building, furniture",old:"194I",rate:10,thr:"₹50,000 a month"},
+  {k:"194I-pm",label:"Rent: plant, machinery, equipment",old:"194I",rate:2,thr:"₹50,000 a month"},
+  {k:"194H",label:"Commission / brokerage",old:"194H",rate:2,thr:"₹20,000 in the year"},
+  {k:"194Q",label:"Purchase of goods",old:"194Q",rate:0.1,thr:"On purchases above ₹50 lakh from one seller in the year (buyer turnover over ₹10 crore)",noPan:5},
+  {k:"194A",label:"Interest (other than securities)",old:"194A",rate:10,thr:"₹10,000 in the year (non-bank payer)"},
+  {k:"other",label:"Other (enter rate)",old:"",rate:0,thr:""},
+];
+const tdsSec=k=>TDS_SEC.find(x=>x.k===k)||TDS_SEC[TDS_SEC.length-1];
+const PAN_RE=/^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const addDays=(iso,n)=>{const d=new Date(iso+"T00:00:00Z");d.setUTCDate(d.getUTCDate()+Math.round(n));return d.toISOString().slice(0,10)};
+const daysBetween=(a,b)=>Math.round((new Date(b+"T00:00:00Z")-new Date(a+"T00:00:00Z"))/864e5);
 const GSTIN_RE=/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 const ICON={
   dashboard:'<rect x="3" y="3" width="7.5" height="9" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="1.6"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="1.6"/><rect x="3" y="15" width="7.5" height="6" rx="1.6"/>',
@@ -258,7 +281,7 @@ const ic=n=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||"
 const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["settings","Settings"]];
 
 /* ---------- state ---------- */
-const S={items:[],customers:[],vendors:[],purchases:[],sales:[],settings:{},counters:{}};
+const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],settings:{},counters:{}};
 let view="dashboard", sub={}, backend=null, renderQueued=false;
 const TAB=Math.random().toString(36).slice(2);
 
@@ -341,7 +364,7 @@ async function localBackend(){
   const tx=(mode,fn)=>new Promise((res,rej)=>{const t=idb.transaction("kv",mode);const st=t.objectStore("kv");const out=fn(st);t.oncomplete=()=>res(out&&out.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)});
   const idbPut=(k,v)=>tx("readwrite",st=>st.put(v,k));
   const idbDel=k=>tx("readwrite",st=>st.delete(k));
-  const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
+  const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
   if(idb){
     const all=await new Promise((res,rej)=>{const out=[];const t=idb.transaction("kv","readonly");const c=t.objectStore("kv").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push([cur.key,cur.value]);cur.continue()}else res(out)};c.onerror=()=>rej(c.error)});
     for(const [k,v] of all){const [coll]=String(k).split("/");if(COLLS.includes(coll))S[coll].push(v);else if(k==="settings")S.settings=v;else if(k==="counters")S.counters=v}
@@ -395,6 +418,8 @@ async function allocInvoiceNo(date){
 /* ---------- file output ---------- */
 let downloadsNS=null;
 const NATIVE=(typeof window.LBNative==="object"&&window.LBNative)?window.LBNative:null;
+const DESKTOP=!!(NATIVE&&NATIVE.platform==="desktop");
+const DEVICE=DESKTOP?"computer":"tablet";
 const blobToB64=b=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=()=>rej(r.error);r.readAsDataURL(b)});
 async function saveFile(filename,data,mime){
   if(NATIVE){try{const b64=await blobToB64(data instanceof Blob?data:new Blob([data],{type:mime}));const r=NATIVE.saveFile(b64,filename,mime);if(String(r).startsWith("error"))throw new Error(r);toast("Saved to "+r)}catch(e){toast("Could not save "+filename)}return}
@@ -478,19 +503,23 @@ async function sendWhatsApp(s,{auto}={}){
   if(S.settings.waMode==="api"&&S.settings.waApiPhoneId&&S.settings.waApiToken){
     const id=uid();const c=docCalc(s);
     const vars=(S.settings.waApiVars||"customer,invoice,amount").split(",").map(x=>x.trim()).filter(Boolean).map(k=>({customer:s.party?.name||"",invoice:s.no,amount:inr.format(c.grand),date:fmtDate(s.date),business:S.settings.name||""}[k]??k));
-    const r=await new Promise(res=>{nativeCbs[id]=res;NATIVE.waCloudSend(id,JSON.stringify({phoneId:S.settings.waApiPhoneId,token:S.settings.waApiToken,template:S.settings.waApiTemplate||"invoice_copy",lang:S.settings.waApiLang||"en",to:phone,filename:fname,pdf:b64,bodyParams:vars}))});
+    const payload=JSON.stringify({phoneId:S.settings.waApiPhoneId,token:S.settings.waApiToken,template:S.settings.waApiTemplate||"invoice_copy",lang:S.settings.waApiLang||"en",to:phone,filename:fname,pdf:b64,bodyParams:vars});
+    let r;
+    if(NATIVE.waCloudSendAsync){try{r=JSON.parse(await NATIVE.waCloudSendAsync(payload))}catch(e){r={ok:false,error:String(e&&e.message||e)}}}
+    else r=await new Promise(res=>{nativeCbs[id]=res;NATIVE.waCloudSend(id,payload)});
     if(r.ok){toast(`Invoice sent to ${s.party.name} on WhatsApp`);await backend.put("sales",{...s,waSentAt:new Date().toISOString()}).catch(()=>{});return true}
     toast("WhatsApp Business API: "+(r.error||"send failed")+". Opening WhatsApp instead.");
   }
   const r=NATIVE.shareToWhatsApp(b64,fname,phone,waText(s));
   if(r==="no_whatsapp")toast("WhatsApp is not installed. Choose another app to share.");
+  if(r==="desktop")toast("WhatsApp is opening the chat. The PDF is in Downloads\\Ledgerbook (folder opened): drag it into the chat.");
   return true;
 }
 function printInvoice(s){
   const thermal=S.settings.printLayout==="thermal";
   const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(s.no)}</title></head><body>${thermal?thermalHTML(s):invoiceHTML(s,true)}</body></html>`;
   if(NATIVE){NATIVE.printHtml(html,s.no);return}
-  toast("Printing works in the tablet app. Here, download the PDF and print it.");
+  toast("Printing works in the tablet and Windows apps. Here, download the PDF and print it.");
 }
 function thermalHTML(s){
   const c=docCalc(s),B=S.settings,n=v=>inr.format(v);
@@ -632,7 +661,7 @@ function vParties(coll){
   const title=isC?"Customers":"Vendors";
   return `<div class="head"><div><h1>${title}</h1><div class="sub">${isC?"Who you bill. GSTIN decides B2B vs B2C in GSTR-1; delivery state is the place of supply.":"Who you buy material from."}</div></div><button class="btn pri" data-act="${isC?"newCustomer":"newVendor"}">Add ${isC?"customer":"vendor"}</button></div>
   <div class="filters"><label class="f" style="width:280px"><span>Search</span><input class="input" id="partyQ" placeholder="Name, GSTIN, phone, email" value="${esc(sub.q||"")}"></label></div>
-  ${S[coll].length?`<div class="tablewrap"><table><thead><tr><th>Name</th><th>GSTIN</th><th>State</th><th>Contact</th><th class="num">${isC?"Billed":"Purchased"}</th><th></th></tr></thead><tbody>${rows.map(p=>{const docs=isC?S.sales.filter(s=>s.partyId===p.id&&s.status!=="cancelled"):S.purchases.filter(x=>x.partyId===p.id);const t=docs.reduce((a,d)=>a+docCalc(d).grand,0);return `<tr><td><b>${esc(p.name)}</b> ${p.sample?'<span class="chip sample">Sample</span>':""}${p.contact?`<div class="hint">${esc(p.contact)}</div>`:""}</td><td class="mono">${p.gstin?esc(p.gstin):'<span class="chip">Unregistered</span>'}</td><td>${esc(STATE_NAME[p.bill?.state]||"")}</td><td>${esc(p.phone)}${p.email?`<div class="hint">${esc(p.email)}</div>`:""}</td><td class="num">${amt(t)}<div class="hint">${docs.length} ${isC?"invoices":"bills"}</div></td><td><button class="btn sm" data-edit-party="${coll}:${p.id}">Edit</button></td></tr>`}).join("")}</tbody></table></div>`:`<div class="tablewrap"><div class="empty"><b>No ${title.toLowerCase()} yet</b>${isC?"Add a customer to start invoicing.":"Add a vendor to record purchases."}<div style="margin-top:12px"><button class="btn pri" data-act="${isC?"newCustomer":"newVendor"}">Add ${isC?"customer":"vendor"}</button></div></div></div>`}`;
+  ${S[coll].length?`<div class="tablewrap"><table><thead><tr><th>Name</th><th>GSTIN</th><th>State</th><th>Contact</th><th class="num">${isC?"Billed":"Purchased"}</th><th></th></tr></thead><tbody>${rows.map(p=>{const docs=isC?S.sales.filter(s=>s.partyId===p.id&&s.status!=="cancelled"):S.purchases.filter(x=>x.partyId===p.id);const t=docs.reduce((a,d)=>a+docCalc(d).grand,0);return `<tr><td><b>${esc(p.name)}</b> ${p.msme?`<span class="chip ${p.msme==="medium"?"":"warn"}">MSME · ${p.msme[0].toUpperCase()+p.msme.slice(1)}</span>`:""} ${p.sample?'<span class="chip sample">Sample</span>':""}${p.contact?`<div class="hint">${esc(p.contact)}</div>`:""}</td><td class="mono">${p.gstin?esc(p.gstin):'<span class="chip">Unregistered</span>'}</td><td>${esc(STATE_NAME[p.bill?.state]||"")}</td><td>${esc(p.phone)}${p.email?`<div class="hint">${esc(p.email)}</div>`:""}</td><td class="num">${amt(t)}<div class="hint">${docs.length} ${isC?"invoices":"bills"}</div></td><td><button class="btn sm" data-edit-party="${coll}:${p.id}">Edit</button></td></tr>`}).join("")}</tbody></table></div>`:`<div class="tablewrap"><div class="empty"><b>No ${title.toLowerCase()} yet</b>${isC?"Add a customer to start invoicing.":"Add a vendor to record purchases."}<div style="margin-top:12px"><button class="btn pri" data-act="${isC?"newCustomer":"newVendor"}">Add ${isC?"customer":"vendor"}</button></div></div></div>`}`;
 }
 
 function addrBlock(pfx,a,label){a=a||{};return `<fieldset id="${pfx}_fs"><legend>${label}</legend><div class="grid g3">
@@ -653,6 +682,12 @@ function openPartyForm(coll,id,after){
    ${addrBlock("b",p.bill,isC?"Invoice address":"Billing address")}
    <label class="check"><input type="checkbox" id="p_same"${p.same!==false?" checked":""}> ${shipLbl} is the same as ${isC?"invoice":"billing"} address</label>
    <div id="shipWrap">${addrBlock("s",p.same!==false?p.bill:p.ship,shipLbl)}</div>
+   ${isC?"":`<fieldset><legend>MSME &amp; payment terms</legend><div class="grid g3">
+    <label class="f"><span>MSME (Udyam) category</span><select class="input" id="p_msme"><option value="">Not MSME / not known</option>${[["micro","Micro"],["small","Small"],["medium","Medium"]].map(([k,l])=>`<option value="${k}"${p.msme===k?" selected":""}>${l}</option>`).join("")}</select></label>
+    <label class="f"><span>Udyam registration no.</span><input class="input mono" id="p_udyam" placeholder="UDYAM-MH-00-0000000" style="text-transform:uppercase" value="${esc(p.udyam)}"></label>
+    <label class="f"><span>Agreed credit days</span><input class="input" id="p_cdays" type="number" min="0" max="365" placeholder="e.g. 30" value="${p.creditDays??""}"></label>
+    <span class="hint spanall">For Micro and Small suppliers, the law allows at most 45 days (15 days without a written agreement). Late bills show up in Reports → MSME dues.</span>
+   </div></fieldset>`}
    <fieldset><legend>Contact details</legend><div class="grid g2">
     <label class="f"><span>Contact person</span><input class="input" id="p_contact" value="${esc(p.contact)}"></label>
     <label class="f"><span>Mobile (used for WhatsApp)</span><input class="input" id="p_phone" inputmode="tel" value="${esc(p.phone)}"></label>
@@ -676,6 +711,8 @@ function openPartyForm(coll,id,after){
     if(gstin&&gstin.slice(0,2)!==bill.state&&GSTIN_RE.test(gstin)){$("#partyErr").innerHTML=`<div class="err">GSTIN state code ${gstin.slice(0,2)} does not match the ${isC?"invoice":"billing"} address state ${bill.state}. Check either one.</div>`;return}
     const ship=same?{...bill}:readAddr("s");if(!same&&!ship.state){$("#partyErr").innerHTML=`<div class="err">Choose a state for the ${shipLbl.toLowerCase()}.</div>`;return}
     const o={...p,id:id||uid(),name,gstin,bill,ship,same,contact:$("#p_contact").value.trim(),phone:$("#p_phone").value.trim(),email:$("#p_email").value.trim(),pan:$("#p_pan").value.trim().toUpperCase()};
+    if(!isC){o.msme=$("#p_msme").value;o.udyam=$("#p_udyam").value.trim().toUpperCase();const cd=$("#p_cdays").value.trim();o.creditDays=cd===""?null:num(cd);
+      if(o.pan&&!PAN_RE.test(o.pan)){$("#partyErr").innerHTML=`<div class="err">PAN should look like ABCDE1234F.</div>`;return}}
     await guard(()=>backend.put(coll,o));closeModal();toast(id?"Saved":(isC?"Customer added":"Vendor added"));if(after)after(o.id);
   };
 }
@@ -932,17 +969,34 @@ function viewSale(id,justSaved){
 }
 
 /* ---------- Purchases ---------- */
+/* Purchase payment terms: agreed credit days → due date; MSME (micro/small) capped at 45 days, 15 without agreement */
+function purTerms(p){
+  const v=byId("vendors",p.partyId)||{};
+  const msme=v.msme==="micro"||v.msme==="small";
+  const set=x=>x!==null&&x!==undefined&&x!=="";
+  const agreed=set(p.creditDays)?num(p.creditDays):set(v.creditDays)?num(v.creditDays):null;
+  const days=agreed!==null?agreed:(msme?15:30);
+  const legal=msme?Math.min(days,agreed!==null?45:15):days;
+  return {v,msme,days,due:addDays(p.date,days),msmeDue:addDays(p.date,legal),legal};
+}
+function purStatus(p){
+  const t=purTerms(p),today=todayISO();
+  if(p.paidOn){const late=t.msme&&p.paidOn>t.msmeDue;return `<span class="chip ${late?"warn":"good"}">Paid ${fmtDate(p.paidOn)}</span>${late?`<div class="hint">${daysBetween(t.msmeDue,p.paidOn)} days past MSME limit</div>`:""}`}
+  const d=daysBetween(today,t.due);
+  return d<0?`<span class="chip bad">Overdue ${-d}d</span>`:`<span class="chip ${d<=3?"warn":""}">Due ${d===0?"today":"in "+d+"d"}</span>`;
+}
 function vPurchases(){
   const q=(sub.q||"").toLowerCase();
   const rows=S.purchases.filter(p=>!q||(p.billNo+" "+p.party?.name+" "+p.party?.gstin).toLowerCase().includes(q)).sort((a,b)=>b.date.localeCompare(a.date));
-  return `<div class="head"><div><h1>Purchases</h1><div class="sub">Each purchase bill adds its quantities to stock. Input GST is tracked for your records.</div></div><button class="btn pri" data-act="newPurchase">New purchase</button></div>
+  return `<div class="head"><div><h1>Purchases</h1><div class="sub">Each purchase bill adds its quantities to stock. Track when each bill is due and paid, and deduct TDS where it applies.</div></div><button class="btn pri" data-act="newPurchase">New purchase</button></div>
   <div class="filters"><label class="f" style="width:260px"><span>Search</span><input class="input" id="purQ" placeholder="Bill no, vendor, GSTIN" value="${esc(sub.q||"")}"></label></div>
-  ${S.purchases.length?`<div class="tablewrap"><table><thead><tr><th>Date</th><th>Vendor bill no</th><th>Vendor</th><th class="num">Qty</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th><th></th></tr></thead><tbody>${rows.map(p=>{const c=docCalc(p);return `<tr><td class="mono">${fmtDate(p.date)}</td><td class="mono">${esc(p.billNo)}</td><td>${esc(p.party?.name)} ${p.sample?'<span class="chip sample">Sample</span>':""}<div class="hint mono">${esc(p.party?.gstin||"Unregistered")}</div></td><td class="num">${qtyf(c.qty)}</td><td class="num">${amt(c.taxable)}</td><td class="num">${amt(c.tax)}</td><td class="num"><b>${amt(c.grand)}</b></td><td><button class="btn sm" data-view-pur="${p.id}">Open</button></td></tr>`}).join("")}</tbody></table></div>`:`<div class="tablewrap"><div class="empty"><b>No purchases yet</b>Record a vendor bill to add stock.<div style="margin-top:12px"><button class="btn pri" data-act="newPurchase">New purchase</button></div></div></div>`}`;
+  ${S.purchases.length?`<div class="tablewrap"><table><thead><tr><th>Date</th><th>Vendor bill no</th><th>Vendor</th><th>Payment</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th><th></th></tr></thead><tbody>${rows.map(p=>{const c=docCalc(p);const t=purTerms(p);const td=S.tds.find(x=>x.purchaseId===p.id);return `<tr><td class="mono">${fmtDate(p.date)}</td><td class="mono">${esc(p.billNo)}</td><td>${esc(p.party?.name)} ${t.msme?'<span class="chip warn">MSME</span>':""} ${td?`<span class="chip">TDS ${amt(td.tds)}</span>`:""} ${p.sample?'<span class="chip sample">Sample</span>':""}<div class="hint mono">${esc(p.party?.gstin||"Unregistered")}</div></td><td>${purStatus(p)}</td><td class="num">${amt(c.taxable)}</td><td class="num">${amt(c.tax)}</td><td class="num"><b>${amt(c.grand)}</b></td><td><div class="row" style="flex-wrap:nowrap">${p.paidOn?"":`<button class="btn sm" data-pay-pur="${p.id}">Mark paid</button>`}<button class="btn sm" data-view-pur="${p.id}">Open</button></div></td></tr>`}).join("")}</tbody></table></div>`:`<div class="tablewrap"><div class="empty"><b>No purchases yet</b>Record a vendor bill to add stock.<div style="margin-top:12px"><button class="btn pri" data-act="newPurchase">New purchase</button></div></div></div>`}`;
 }
 
 function openPurchaseForm(editId){
   if(!S.items.length){toast("Add an item first in Items & HSN");go("items");return}
   const ex=editId?byId("purchases",editId):null;
+  const exTds=ex?S.tds.find(x=>x.purchaseId===ex.id):null;
   const st=ex?{partyId:ex.partyId,lines:JSON.parse(JSON.stringify(ex.lines))}:{partyId:"",lines:[{qty:0,rate:0,disc:0,gst:18}]};
   const home=S.settings.state||"";
   openModal(ex?"Edit purchase":"New purchase",`<div class="grid g4">
@@ -950,12 +1004,38 @@ function openPurchaseForm(editId){
    <label class="f req"><span>Vendor bill no</span><input class="input" id="po_bill" value="${esc(ex?.billNo)}"></label>
    <label class="f req"><span>Bill date</span><input class="input" type="date" id="po_date" value="${ex?.date||todayISO()}"></label>
   </div><div id="po_kind" style="margin:10px 0"></div><div id="lines"></div>
+  <div class="grid g4" style="margin-top:14px">
+   <label class="f"><span>Credit days agreed</span><input class="input" id="po_cdays" type="number" min="0" max="365" value="${ex?.creditDays??""}" placeholder="From vendor"></label>
+   <label class="f"><span>Paid on (leave blank if unpaid)</span><input class="input" id="po_paid" type="date" value="${ex?.paidOn||""}"></label>
+   <div class="f span2" id="po_due" style="font-size:12px;color:var(--muted);justify-content:flex-end"></div>
+  </div>
+  <fieldset style="margin-top:14px"><legend>TDS</legend>
+   <label class="check"><input type="checkbox" id="po_tdsOn"${exTds?" checked":""}> Deduct TDS on this bill</label>
+   <div class="grid g4" id="po_tdsBox" style="margin-top:10px"${exTds?"":" hidden"}>
+    <label class="f span2"><span>Nature of payment</span><select class="input" id="po_tdsSec">${TDS_SEC.map(x=>`<option value="${x.k}"${(exTds?.section||"194Q")===x.k?" selected":""}>${esc(x.label)}${x.old?" (old "+x.old+")":""} · ${x.rate}%</option>`).join("")}</select></label>
+    <label class="f"><span>Rate %</span><input class="input" id="po_tdsRate" type="number" step="0.01" min="0" value="${exTds?.rate??""}"></label>
+    <label class="f"><span>TDS amount</span><input class="input mono" id="po_tdsAmt" type="number" step="0.01" min="0" value="${exTds?.tds??""}"></label>
+    <span class="hint spanall" id="po_tdsHint"></span>
+   </div>
+  </fieldset>
   <label class="f" style="margin-top:12px"><span>Notes (optional)</span><input class="input" id="po_notes" value="${esc(ex?.notes)}"></label><div id="purErr"></div>`,
   `${ex?`<button class="btn danger" id="delPur" style="margin-right:auto">Delete</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="savePur">${ex?"Save changes":"Save purchase"}</button>`,{wide:true});
   const inter=()=>{const v=byId("vendors",st.partyId);const vs=v?.ship?.state||v?.bill?.state;return !!(home&&vs&&vs!==home)};
   const kind=()=>{$("#po_kind").innerHTML=st.partyId?(inter()?`<span class="chip warn">Inter-state purchase · IGST</span>`:`<span class="chip good">Intra-state purchase · CGST + SGST</span>`):""};
   const le=lineEditor("purchase",st.lines,inter);kind();
-  $("#po_v").onchange=e=>{st.partyId=e.target.value;kind();le.draw()};
+  const showDue=()=>{const v=byId("vendors",st.partyId);if(!v){$("#po_due").textContent="";return}
+    const t=purTerms({partyId:v.id,date:$("#po_date").value||todayISO(),creditDays:$("#po_cdays").value});
+    $("#po_due").innerHTML=`Due on <b style="color:var(--ink)">${fmtDate(t.due)}</b> (${t.days} days)${t.msme?` · MSME ${esc(v.msme)}: must pay by <b style="color:var(--warn)">${fmtDate(t.msmeDue)}</b>`:""}`;
+    if(!$("#po_cdays").value&&v.creditDays!=null&&v.creditDays!=="")$("#po_cdays").placeholder=`${v.creditDays} (vendor default)`};
+  const tdsCalc=(force)=>{const sec=tdsSec($("#po_tdsSec").value),v=byId("vendors",st.partyId);const noPan=!(v?.pan||v?.gstin);
+    if(force||$("#po_tdsRate").value==="")$("#po_tdsRate").value=noPan&&sec.k!=="other"?(sec.noPan||20):sec.rate;
+    const base=calcLines(st.lines,inter()).taxable;$("#po_tdsAmt").value=r2(base*num($("#po_tdsRate").value)/100).toFixed(2);
+    $("#po_tdsHint").textContent=`On taxable value ${money(base)}. ${sec.thr?"Threshold: "+sec.thr+". ":""}${noPan?"Vendor has no PAN, so the higher no-PAN rate applies. ":""}Deposit by the 7th of next month (30 April for March).`};
+  $("#po_tdsOn").onchange=e=>{$("#po_tdsBox").hidden=!e.target.checked;if(e.target.checked)tdsCalc(!exTds)};
+  $("#po_tdsSec").onchange=()=>tdsCalc(true);$("#po_tdsRate").oninput=()=>tdsCalc(false);
+  $("#lines").addEventListener("change",()=>{if($("#po_tdsOn").checked)tdsCalc(false)});
+  ["po_date","po_cdays"].forEach(i=>$("#"+i).addEventListener("input",showDue));showDue();if(exTds)tdsCalc(false);
+  $("#po_v").onchange=e=>{st.partyId=e.target.value;kind();le.draw();showDue();if($("#po_tdsOn").checked)tdsCalc(true)};
   $("#po_newv").onclick=()=>openPartyForm("vendors",null,()=>toast("Vendor added. Open New purchase again to use it."));
   $("#savePur").onclick=async()=>{
     const v=byId("vendors",st.partyId),bill=$("#po_bill").value.trim(),date=$("#po_date").value,lines=st.lines.filter(l=>l.itemId&&num(l.qty)>0);
@@ -963,10 +1043,63 @@ function openPurchaseForm(editId){
     if(!v)return err("Choose a vendor.");if(!bill)return err("Enter the vendor's bill number.");if(!date)return err("Choose the bill date.");if(!lines.length)return err("Add at least one item with a quantity.");
     if(S.purchases.some(p=>p.partyId===v.id&&p.billNo.toLowerCase()===bill.toLowerCase()&&p.id!==editId))return err(`Bill ${esc(bill)} from this vendor is already recorded.`);
     const o={...(ex||{}),id:editId||uid(),billNo:bill,date,partyId:v.id,party:{name:v.name,gstin:v.gstin||"",bill:v.bill,ship:v.ship},inter:inter(),lines:lines.map(l=>({itemId:l.itemId,name:l.name,sku:l.sku,hsn:l.hsn,unit:l.unit,qty:num(l.qty),rate:num(l.rate),disc:num(l.disc),gst:num(l.gst)})),notes:$("#po_notes").value.trim()};
+    const cd=$("#po_cdays").value.trim();o.creditDays=cd===""?null:num(cd);o.paidOn=$("#po_paid").value||"";
+    if(o.paidOn&&o.paidOn<date)return err("The paid-on date is before the bill date.");
     o.grand=docCalc(o).grand;
-    await guard(()=>backend.put("purchases",o));closeModal();toast(editId?"Purchase updated":"Purchase saved · stock added");
+    const tdsOn=$("#po_tdsOn").checked;
+    if(tdsOn&&num($("#po_tdsAmt").value)<=0)return err("Enter the TDS amount, or untick Deduct TDS.");
+    await guard(()=>backend.put("purchases",o));
+    if(tdsOn){const sec=$("#po_tdsSec").value,base=docCalc(o).taxable;
+      await guard(()=>backend.put("tds",{...(exTds||{}),id:exTds?.id||uid(),purchaseId:o.id,date,payee:v.name,vendorId:v.id,pan:v.pan||(v.gstin?v.gstin.slice(2,12):""),section:sec,amount:base,rate:num($("#po_tdsRate").value),tds:num($("#po_tdsAmt").value),ref:"Bill "+bill}))}
+    else if(exTds)await guard(()=>backend.remove("tds",exTds.id));
+    closeModal();toast(editId?"Purchase updated":"Purchase saved · stock added");
   };
-  if(ex)$("#delPur").onclick=()=>confirmIn("#purErr","Delete this purchase? Its quantities will be removed from stock.",async()=>{await guard(()=>backend.remove("purchases",editId));closeModal();toast("Purchase deleted")});
+  if(ex)$("#delPur").onclick=()=>confirmIn("#purErr","Delete this purchase? Its quantities will be removed from stock.",async()=>{await guard(()=>backend.remove("purchases",editId));if(exTds)await guard(()=>backend.remove("tds",exTds.id));closeModal();toast("Purchase deleted")});
+}
+
+/* ---------- TDS entries ---------- */
+function openTdsForm(id){
+  const e=id?byId("tds",id):{date:todayISO(),section:"194J-prof"};
+  if(e.purchaseId&&!id)return;
+  const linked=!!e.purchaseId;
+  openModal(id?"Edit TDS entry":"Add TDS entry",`<div class="grid g4">
+   <label class="f req"><span>Date paid / credited</span><input class="input" type="date" id="td_date" value="${e.date}"${linked?" disabled":""}></label>
+   <label class="f req span2"><span>Paid to (deductee)</span><input class="input" id="td_payee" list="td_vendors" value="${esc(e.payee)}"${linked?" disabled":""}></label>
+   <label class="f"><span>Deductee PAN</span><input class="input mono" id="td_pan" maxlength="10" style="text-transform:uppercase" value="${esc(e.pan)}" placeholder="ABCDE1234F"></label>
+   <label class="f req span2"><span>Nature of payment</span><select class="input" id="td_sec"${linked?" disabled":""}>${TDS_SEC.map(x=>`<option value="${x.k}"${e.section===x.k?" selected":""}>${esc(x.label)}${x.old?" (old "+x.old+")":""} · ${x.rate}%</option>`).join("")}</select></label>
+   <label class="f req"><span>Amount paid / credited</span><input class="input mono" id="td_amt" type="number" step="0.01" min="0" value="${e.amount??""}"${linked?" disabled":""}></label>
+   <label class="f"><span>Payment code (Form 140)</span><input class="input mono" id="td_code" maxlength="6" value="${esc(e.code)}" placeholder="e.g. 10xx"></label>
+   <label class="f"><span>Rate %</span><input class="input" id="td_rate" type="number" step="0.01" min="0" value="${e.rate??""}"${linked?" disabled":""}></label>
+   <label class="f"><span>TDS deducted</span><input class="input mono" id="td_tds" type="number" step="0.01" min="0" value="${e.tds??""}"${linked?" disabled":""}></label>
+   <div class="hint span2" id="td_hint" style="align-self:end"></div>
+  </div>
+  <fieldset style="margin-top:14px"><legend>Deposit (challan)</legend><div class="grid g3">
+   <label class="f"><span>BSR code</span><input class="input mono" id="td_bsr" maxlength="7" inputmode="numeric" value="${esc(e.bsr)}"></label>
+   <label class="f"><span>Challan serial no.</span><input class="input mono" id="td_chl" maxlength="10" value="${esc(e.challan)}"></label>
+   <label class="f"><span>Date deposited</span><input class="input" type="date" id="td_dep" value="${e.depDate||""}"></label>
+  </div></fieldset>
+  ${linked?`<p class="hint">Linked to a purchase bill (${esc(e.ref||"")}). Change the amount from that purchase.</p>`:""}
+  <datalist id="td_vendors">${S.vendors.map(v=>`<option value="${esc(v.name)}"></option>`).join("")}</datalist>
+  <div id="tdErr"></div>`,
+  `${id&&!linked?`<button class="btn danger" id="td_del" style="margin-right:auto">Delete</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="td_save">${id?"Save":"Add entry"}</button>`,{wide:true});
+  const calc=force=>{if(linked)return;const sec=tdsSec($("#td_sec").value),pan=$("#td_pan").value.trim();
+    if(force||$("#td_rate").value==="")$("#td_rate").value=!pan&&sec.k!=="other"?(sec.noPan||20):sec.rate;
+    $("#td_tds").value=r2(num($("#td_amt").value)*num($("#td_rate").value)/100).toFixed(2);
+    $("#td_hint").textContent=(sec.thr?"Threshold: "+sec.thr+". ":"")+(!pan?"No PAN: higher rate applies.":"")};
+  $("#td_sec").onchange=()=>calc(true);$("#td_amt").oninput=()=>calc(false);$("#td_rate").oninput=()=>calc(false);$("#td_pan").oninput=()=>calc(true);
+  $("#td_payee").onchange=()=>{const v=S.vendors.find(x=>x.name===$("#td_payee").value);if(v&&!$("#td_pan").value){$("#td_pan").value=v.pan||(v.gstin?v.gstin.slice(2,12):"");calc(true)}};
+  if(!id)calc(true);
+  $("#td_save").onclick=async()=>{
+    const err=m=>$("#tdErr").innerHTML=`<div class="err">${m}</div>`;
+    const pan=$("#td_pan").value.trim().toUpperCase();
+    if(!$("#td_date").value||!$("#td_payee").value.trim())return err("Enter the date and who was paid.");
+    if(num($("#td_amt").value)<=0)return err("Enter the amount paid or credited.");
+    if(pan&&!PAN_RE.test(pan))return err("PAN should look like ABCDE1234F.");
+    const bsr=$("#td_bsr").value.trim();if(bsr&&!/^\d{7}$/.test(bsr))return err("BSR code has 7 digits.");
+    const o={...e,id:e.id||uid(),date:$("#td_date").value,payee:$("#td_payee").value.trim(),pan,section:$("#td_sec").value,amount:num($("#td_amt").value),code:$("#td_code").value.trim(),rate:num($("#td_rate").value),tds:num($("#td_tds").value),bsr,challan:$("#td_chl").value.trim(),depDate:$("#td_dep").value||""};
+    await guard(()=>backend.put("tds",o));closeModal();toast(id?"TDS entry saved":"TDS entry added");
+  };
+  if($("#td_del"))$("#td_del").onclick=()=>confirmIn("#tdErr","Delete this TDS entry?",async()=>{await guard(()=>backend.remove("tds",id));closeModal();toast("TDS entry deleted")});
 }
 
 /* ---------- Reports ---------- */
@@ -980,7 +1113,7 @@ const inRange=d=>d.date>=sub.from&&d.date<=sub.to;
 
 function vReports(){
   const tab=sub.tab||"sales";
-  const tabs=[["sales","Sales register"],["purchase","Purchase register"],["gstr1","GSTR-1"],["itemwise","Item-wise sales"],["stock","Stock summary"]];
+  const tabs=[["sales","Sales register"],["purchase","Purchase register"],["gstr1","GSTR-1"],["gstr3b","GSTR-3B"],["tds","TDS · Form 140"],["msme","MSME dues"],["itemwise","Item-wise sales"],["stock","Stock summary"]];
   let body="";
   const T=tabs.map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${tab===k}">${l}</button>`).join("");
   if(tab==="sales"||tab==="purchase"){
@@ -994,6 +1127,9 @@ function vReports(){
     <div class="tablewrap">${rows.length?`<table><thead><tr><th>${isS?"Invoice no":"Bill no"}</th><th>Date</th><th>${isS?"Customer":"Vendor"}</th><th>GSTIN</th>${isS?"<th>Payment</th>":""}<th class="num">Taxable</th><th class="num">CGST</th><th class="num">SGST</th><th class="num">IGST</th><th class="num">Total</th></tr></thead><tbody>${rows.map(({d,c,x})=>`<tr><td class="mono">${isS?`<button class="link" data-view-sale="${d.id}">${esc(d.no)}</button>`:esc(d.billNo)} ${x?'<span class="chip bad">Cancelled</span>':""}</td><td class="mono">${fmtDate(d.date)}</td><td>${esc(d.party?.name)}</td><td class="mono">${esc(d.party?.gstin||"—")}</td>${isS?`<td>${payChip(d)}</td>`:""}<td class="num">${amt(x?0:c.taxable)}</td><td class="num">${amt(x?0:c.cgst)}</td><td class="num">${amt(x?0:c.sgst)}</td><td class="num">${amt(x?0:c.igst)}</td><td class="num">${amt(x?0:c.grand)}</td></tr>`).join("")}</tbody><tfoot><tr><td colspan="${isS?5:4}">Total</td><td class="num">${amt(tot.tx)}</td><td class="num">${amt(tot.c)}</td><td class="num">${amt(tot.s)}</td><td class="num">${amt(tot.i)}</td><td class="num">${amt(tot.g)}</td></tr></tfoot></table>`:`<div class="empty"><b>Nothing in this period</b>Change the dates above.</div>`}</div>`;
   }
   else if(tab==="gstr1") body=gstr1();
+  else if(tab==="gstr3b") body=gstr3b();
+  else if(tab==="tds") body=tdsReport();
+  else if(tab==="msme") body=msmeReport();
   else if(tab==="itemwise"){
     const g={};for(const s of S.sales.filter(inRange))if(s.status!=="cancelled")for(const l of docCalc(s).lines){const k=l.itemId;(g[k]=g[k]||{name:l.name,sku:l.sku,hsn:l.hsn,unit:l.unit,q:0,tx:0,tax:0,t:0});g[k].q+=l.qty;g[k].tx+=l.taxable;g[k].tax+=l.cgst+l.sgst+l.igst;g[k].t+=l.total}
     const rows=Object.values(g).sort((a,b)=>b.tx-a.tx);
@@ -1006,6 +1142,120 @@ function vReports(){
     body=`<p class="muted">Current position across all dates. For live stock with status, see <button class="link" data-go="inventory">Inventory</button>.</p><div class="row" style="justify-content:flex-end;margin-bottom:8px"><button class="btn sm" data-act="exportReport">Export CSV</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>SKU</th><th>Item</th><th class="num">Opening</th><th class="num">In</th><th class="num">Out</th><th class="num">Closing</th><th class="num">Value at cost</th></tr></thead><tbody>${rows.map(([i,s])=>`<tr><td class="mono">${esc(i.sku)}</td><td>${esc(i.name)}</td><td class="num">${qtyf(s.open)}</td><td class="num">${qtyf(s.inQ)}</td><td class="num">${qtyf(s.outQ)}</td><td class="num">${qtyf(s.bal)}</td><td class="num">${amt(s.bal*num(i.purchasePrice))}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No items yet</b></div>`}</div>`;
   }
   return `<div class="head"><div><h1>Reports</h1><div class="sub">Filter by date, review, and export CSV for your accountant or the GST offline tool.</div></div></div><div class="tabs" role="tablist">${T}</div>${body}`;
+}
+
+/* ---------- GSTR-3B summary ---------- */
+function gstr3b(){
+  const out={tx:0,i:0,c:0,s:0},nil={tx:0},pos={},itc={i:0,c:0,s:0},inw={inter:0,intra:0},unreg={tx:0};
+  for(const sl of S.sales.filter(inRange)){if(sl.status==="cancelled")continue;const c=docCalc(sl),b2c=!sl.party?.gstin;
+    for(const l of c.lines){if(l.gst>0){out.tx+=l.taxable;out.i+=l.igst;out.c+=l.cgst;out.s+=l.sgst;if(b2c&&sl.inter){const k=sl.pos;(pos[k]=pos[k]||{tx:0,i:0});pos[k].tx+=l.taxable;pos[k].i+=l.igst}}else nil.tx+=l.taxable}}
+  for(const pu of S.purchases.filter(inRange)){const c=docCalc(pu);
+    if(pu.party?.gstin){for(const l of c.lines){if(l.gst>0){itc.i+=l.igst;itc.c+=l.cgst;itc.s+=l.sgst}else inw[pu.inter?"inter":"intra"]+=l.taxable}}
+    else unreg.tx+=c.taxable}
+  const R=o=>{for(const k in o)o[k]=r2(o[k]);return o};R(out);R(itc);R(nil);R(inw);
+  // set-off order (Rule 88A): IGST credit first (IGST → CGST → SGST), then CGST (CGST → IGST), then SGST (SGST → IGST)
+  const pay={i:out.i,c:out.c,s:out.s},left={...itc},used={i:{i:0,c:0,s:0},c:{i:0,c:0,s:0},s:{i:0,c:0,s:0}};
+  const u=(f,t)=>{const x=r2(Math.min(left[f],pay[t]));left[f]=r2(left[f]-x);pay[t]=r2(pay[t]-x);used[f][t]=r2(used[f][t]+x)};
+  u("i","i");u("i","c");u("i","s");u("c","c");u("c","i");u("s","s");u("s","i");
+  const TH=`<th class="num">Taxable value</th><th class="num">IGST</th><th class="num">CGST</th><th class="num">SGST/UTGST</th><th class="num">Cess</th>`;
+  const row=(lbl,t,i,c,sg)=>`<tr><td>${lbl}</td><td class="num">${t==null?"":amt(t)}</td><td class="num">${amt(i)}</td><td class="num">${amt(c)}</td><td class="num">${amt(sg)}</td><td class="num">${amt(0)}</td></tr>`;
+  const posRows=Object.entries(pos).sort();
+  sub._export=()=>[["GSTR-3B summary",`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`],[],["Table","Description","Taxable value","IGST","CGST","SGST","Cess"],
+    ["3.1(a)","Outward taxable supplies",out.tx,out.i,out.c,out.s,0],["3.1(b)","Zero rated",0,0,0,0,0],["3.1(c)","Nil rated / exempted",nil.tx,0,0,0,0],["3.1(d)","Inward supplies liable to reverse charge",0,0,0,0,0],["3.1(e)","Non-GST outward",0,0,0,0,0],[],
+    ["3.2","Inter-state supplies to unregistered persons: place of supply","Taxable value","IGST"],...posRows.map(([k,v])=>["",stateLabel(k),r2(v.tx),r2(v.i)]),[],
+    ["4(A)(5)","All other ITC","",itc.i,itc.c,itc.s,0],["4(C)","Net ITC available","",itc.i,itc.c,itc.s,0],[],
+    ["5","Nil rated / exempt inward: inter-state",inw.inter],["5","Nil rated / exempt inward: intra-state",inw.intra],["","Purchases from unregistered dealers (no ITC)",r2(unreg.tx)],[],
+    ["6.1","Tax payable","",out.i,out.c,out.s,0],["6.1","Paid through ITC","",r2(out.i-pay.i),r2(out.c-pay.c),r2(out.s-pay.s),0],["6.1","Payable in cash","",pay.i,pay.c,pay.s,0],["","ITC carried forward","",left.i,left.c,left.s,0]];
+  sub._file=`GSTR3B_${sub.from}_to_${sub.to}.csv`;
+  const cash=r2(pay.i+pay.c+pay.s);
+  return rangeFilters()+`<div class="tiles">
+    <div class="tile t-sales"><span class="ib">${ic("sales")}</span><div class="k">Output tax</div><div class="v">${money(out.i+out.c+out.s)}</div><div class="n">On ${money(out.tx)} taxable sales</div></div>
+    <div class="tile t-buy"><span class="ib">${ic("purchases")}</span><div class="k">Input tax credit</div><div class="v">${money(itc.i+itc.c+itc.s)}</div><div class="n">From registered vendors' bills</div></div>
+    <div class="tile t-cash"><span class="ib">${ic("rupee")}</span><div class="k">GST payable in cash</div><div class="v">${money(cash)}</div><div class="n">IGST ${amt(pay.i)} · CGST ${amt(pay.c)} · SGST ${amt(pay.s)}</div></div>
+    <div class="tile t-stock"><span class="ib">${ic("clock")}</span><div class="k">ITC carried forward</div><div class="v">${money(left.i+left.c+left.s)}</div><div class="n">Due: 20th of next month (monthly) · 22nd/24th (QRMP)</div></div></div>
+  <div class="row" style="justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">3.1 Outward supplies</h3><button class="btn sm" data-act="exportReport">Export CSV</button></div>
+  <div class="tablewrap"><table><thead><tr><th>Nature of supplies</th>${TH}</tr></thead><tbody>
+   ${row("(a) Outward taxable supplies (other than zero rated, nil rated and exempted)",out.tx,out.i,out.c,out.s)}${row("(b) Outward taxable supplies (zero rated)",0,0,0,0)}${row("(c) Other outward supplies (nil rated, exempted)",nil.tx,0,0,0)}${row("(d) Inward supplies (liable to reverse charge)",0,0,0,0)}${row("(e) Non-GST outward supplies",0,0,0,0)}</tbody></table></div>
+  <h3 style="margin:18px 0 8px">3.2 Inter-state supplies to unregistered persons</h3>
+  <div class="tablewrap">${posRows.length?`<table><thead><tr><th>Place of supply</th><th class="num">Taxable value</th><th class="num">IGST</th></tr></thead><tbody>${posRows.map(([k,v])=>`<tr><td>${esc(stateLabel(k))}</td><td class="num">${amt(v.tx)}</td><td class="num">${amt(v.i)}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">No inter-state sales to unregistered buyers in this period.</div>`}</div>
+  <div class="two" style="margin-top:18px">
+   <div><h3>4 Eligible ITC</h3><div class="tablewrap"><table><thead><tr><th>Details</th><th class="num">IGST</th><th class="num">CGST</th><th class="num">SGST/UTGST</th></tr></thead><tbody>
+    <tr><td>(A)(5) All other ITC</td><td class="num">${amt(itc.i)}</td><td class="num">${amt(itc.c)}</td><td class="num">${amt(itc.s)}</td></tr>
+    <tr><td>(B) ITC reversed</td><td class="num">0.00</td><td class="num">0.00</td><td class="num">0.00</td></tr>
+    <tr><td><b>(C) Net ITC available</b></td><td class="num"><b>${amt(itc.i)}</b></td><td class="num"><b>${amt(itc.c)}</b></td><td class="num"><b>${amt(itc.s)}</b></td></tr></tbody></table></div></div>
+   <div><h3>5 Exempt, nil-rated &amp; non-GST inward</h3><div class="tablewrap"><table><thead><tr><th>Nature</th><th class="num">Inter-state</th><th class="num">Intra-state</th></tr></thead><tbody>
+    <tr><td>Exempt / nil-rated supplier bills</td><td class="num">${amt(inw.inter)}</td><td class="num">${amt(inw.intra)}</td></tr></tbody></table></div>
+    <p class="hint">Purchases from unregistered dealers in this period: ${money(unreg.tx)} (no ITC).</p></div>
+  </div>
+  <h3 style="margin:18px 0 8px">6.1 Payment of tax</h3>
+  <div class="tablewrap"><table><thead><tr><th>Tax</th><th class="num">Tax payable</th><th class="num">Paid by IGST credit</th><th class="num">Paid by CGST credit</th><th class="num">Paid by SGST credit</th><th class="num">Payable in cash</th></tr></thead><tbody>
+   ${[["Integrated tax (IGST)","i"],["Central tax (CGST)","c"],["State/UT tax (SGST)","s"]].map(([l,k])=>`<tr><td>${l}</td><td class="num">${amt(out[k])}</td><td class="num">${amt(used.i[k])}</td><td class="num">${amt(used.c[k])}</td><td class="num">${amt(used.s[k])}</td><td class="num"><b>${amt(pay[k])}</b></td></tr>`).join("")}
+  </tbody><tfoot><tr><td>Total</td><td class="num">${amt(out.i+out.c+out.s)}</td><td colspan="3"></td><td class="num">${amt(cash)}</td></tr></tfoot></table></div>
+  <p class="hint" style="margin-top:10px">Credit is used in the legal order: IGST credit first, then CGST, then SGST. Before filing, match input tax credit against your GSTR-2B on the GST portal, add any reverse-charge purchases, and check with your tax adviser.</p>`;
+}
+
+/* ---------- TDS register / Form 140 ---------- */
+function fyStartYear(iso){const [y,m]=iso.split("-").map(Number);return m>=4?y:y-1}
+function fyOptions(sel){const ys=new Set([fyStartYear(todayISO())]);for(const c of ["sales","purchases","tds"])for(const d of S[c])if(d.date)ys.add(fyStartYear(d.date));return [...ys].sort((a,b)=>b-a).map(y=>`<option value="${y}"${y===sel?" selected":""}>FY ${y}-${String(y+1).slice(2)}</option>`).join("")}
+const QTRS=[["Q1","Apr–Jun",4,6,"31 Jul"],["Q2","Jul–Sep",7,9,"31 Oct"],["Q3","Oct–Dec",10,12,"31 Jan"],["Q4","Jan–Mar",1,3,"31 May"]];
+function qRange(fy,q){const Q=QTRS.find(x=>x[0]===q),y=q==="Q4"?fy+1:fy,p=n=>String(n).padStart(2,"0");return [`${y}-${p(Q[2])}-01`,`${y}-${p(Q[3])}-${p(new Date(y,Q[3],0).getDate())}`]}
+function tdsReport(){
+  const t=todayISO(),fy=sub.fy??fyStartYear(t);const curQ=(()=>{const m=+t.slice(5,7);return m>=4&&m<=6?"Q1":m<=9&&m>=7?"Q2":m>=10?"Q3":"Q4"})();
+  const q=sub.q4||curQ;sub.fy=fy;sub.q4=q;const [a,b]=qRange(fy,q),Q=QTRS.find(x=>x[0]===q);
+  const rows=S.tds.filter(e=>e.date>=a&&e.date<=b).sort((x,y)=>x.date.localeCompare(y.date));
+  const tot=rows.reduce((o,e)=>(o.amt+=num(e.amount),o.tds+=num(e.tds),o.dep+=e.depDate?num(e.tds):0,o),{amt:0,tds:0,dep:0});
+  const bySec={};for(const e of rows){const k=e.section;(bySec[k]=bySec[k]||{n:0,amt:0,tds:0});bySec[k].n++;bySec[k].amt+=num(e.amount);bySec[k].tds+=num(e.tds)}
+  const noPan=rows.filter(e=>!e.pan).length,undep=rows.filter(e=>!e.depDate);
+  const dueYear=q==="Q3"||q==="Q4"?fy+1:fy;
+  sub._export=()=>[["Sr No","Deductee PAN","Deductee name","Nature of payment","Old section","Payment code","Date of payment/credit","Amount paid/credited","TDS rate %","TDS deducted","Date of deduction","BSR code","Challan serial no","Date of deposit","Reason for higher rate"],
+    ...rows.map((e,i)=>{const s=tdsSec(e.section);return [i+1,e.pan||"PANNOTAVBL",e.payee,s.label,s.old,e.code||"",fmtDate(e.date),r2(num(e.amount)),e.rate,r2(num(e.tds)),fmtDate(e.date),e.bsr||"",e.challan||"",fmtDate(e.depDate||""),e.pan?"":"No PAN"]})];
+  sub._file=`TDS_Form140_FY${fy}-${String(fy+1).slice(2)}_${q}.csv`;
+  return `<div class="filters"><label class="f"><span>Financial year</span><select class="input" id="tdsFY">${fyOptions(fy)}</select></label>
+    <div class="seg" role="group" aria-label="Quarter">${QTRS.map(([k,l])=>`<button type="button" data-q4="${k}" aria-pressed="${k===q}">${k}<small>${l}</small></button>`).join("")}</div>
+    <div class="row" style="margin-left:auto"><button class="btn" data-act="newTds">${ic("plus")} Add TDS entry</button><button class="btn sm" data-act="exportReport">Export CSV</button></div></div>
+  <div class="tiles">
+   <div class="tile t-buy"><span class="ib">${ic("sales")}</span><div class="k">Entries this quarter</div><div class="v">${rows.length}</div><div class="n">${noPan?`<span style="color:var(--bad)">${noPan} without PAN</span>`:"All have PAN"}</div></div>
+   <div class="tile t-sales"><span class="ib">${ic("rupee")}</span><div class="k">Amount paid / credited</div><div class="v">${money(tot.amt)}</div><div class="n">${Q[1]} ${q==="Q4"?fy+1:fy}</div></div>
+   <div class="tile t-cash"><span class="ib">${ic("check")}</span><div class="k">TDS deducted</div><div class="v">${money(tot.tds)}</div><div class="n">${money(tot.dep)} deposited</div></div>
+   <div class="tile t-stock"><span class="ib">${ic("clock")}</span><div class="k">Form 140 due</div><div class="v" style="font-family:var(--f-body)">${Q[4]} ${dueYear+(q==="Q4"||q==="Q3"?0:0)}</div><div class="n">${undep.length?`<span style="color:var(--bad)">${money(tot.tds-tot.dep)} not yet deposited</span>`:"All TDS deposited"}</div></div>
+  </div>
+  <h3>Deductee details</h3>
+  <div class="tablewrap">${rows.length?`<table><thead><tr><th>Date</th><th>Deductee</th><th>PAN</th><th>Nature</th><th class="num">Amount</th><th class="num">Rate</th><th class="num">TDS</th><th>Challan</th><th></th></tr></thead><tbody>${rows.map(e=>{const s=tdsSec(e.section);return `<tr><td class="mono">${fmtDate(e.date)}</td><td>${esc(e.payee)}${e.ref?`<div class="hint">${esc(e.ref)}</div>`:""}</td><td class="mono">${e.pan?esc(e.pan):'<span class="chip bad">No PAN</span>'}</td><td>${esc(s.label)}<div class="hint">${s.old?"old "+s.old:""}${e.code?" · code "+esc(e.code):""}</div></td><td class="num">${amt(num(e.amount))}</td><td class="num">${e.rate}%</td><td class="num"><b>${amt(num(e.tds))}</b></td><td>${e.depDate?`<span class="chip good">Deposited ${fmtDate(e.depDate)}</span><div class="hint mono">${esc(e.bsr||"")} ${esc(e.challan||"")}</div>`:`<span class="chip warn">Not deposited</span>`}</td><td><button class="btn sm" data-edit-tds="${e.id}">Edit</button></td></tr>`}).join("")}</tbody><tfoot><tr><td colspan="4">Total</td><td class="num">${amt(tot.amt)}</td><td></td><td class="num">${amt(tot.tds)}</td><td colspan="2"></td></tr></tfoot></table>`:`<div class="empty"><b>No TDS entries in ${q}</b>Tick “Deduct TDS” on a purchase, or add rent, professional-fee or contractor payments here.</div>`}</div>
+  ${Object.keys(bySec).length?`<h3 style="margin:18px 0 8px">Nature-wise summary</h3><div class="tablewrap"><table><thead><tr><th>Nature of payment</th><th>Old section</th><th class="num">Entries</th><th class="num">Amount</th><th class="num">TDS</th></tr></thead><tbody>${Object.entries(bySec).map(([k,v])=>`<tr><td>${esc(tdsSec(k).label)}</td><td>${tdsSec(k).old}</td><td class="num">${v.n}</td><td class="num">${amt(v.amt)}</td><td class="num">${amt(v.tds)}</td></tr>`).join("")}</tbody></table></div>`:""}
+  <p class="hint" style="margin-top:10px">From 1 April 2026, TDS falls under section 393 of the Income-tax Act, 2025. The quarterly statement for payments to residents is Form 140, which replaces Form 26Q. Deposit TDS by the 7th of the next month (30 April for March). Statements are due 31 Jul, 31 Oct, 31 Jan and 31 May. Fill in the payment code for each entry from the current CBDT list, and check rates and thresholds with your tax adviser. The CSV gives deductee details to enter in the return preparation utility.</p>`;
+}
+
+/* ---------- MSME delayed payments (MSME Form 1 / income-tax disallowance) ---------- */
+function msmeReport(){
+  const t=todayISO(),fy=sub.fy??fyStartYear(t);const h=sub.half||(+t.slice(5,7)>=4&&+t.slice(5,7)<=9?"H1":"H2");sub.fy=fy;sub.half=h;
+  const a=h==="H1"?`${fy}-04-01`:`${fy}-10-01`,b=h==="H1"?`${fy}-09-30`:`${fy+1}-03-31`;
+  const refDate=b<t?b:t;
+  const msmeV=S.vendors.filter(v=>v.msme==="micro"||v.msme==="small");
+  const rows=[];
+  for(const p of S.purchases){const tm=purTerms(p);if(!tm.msme||p.date>b)continue;const g=docCalc(p).grand;
+    if(p.paidOn&&p.paidOn<a)continue;
+    if(p.paidOn&&p.paidOn<=b){if(p.paidOn>tm.msmeDue)rows.push({p,tm,g,status:"late",days:daysBetween(tm.msmeDue,p.paidOn)})}
+    else if(tm.msmeDue<refDate)rows.push({p,tm,g,status:"overdue",days:daysBetween(tm.msmeDue,refDate)})}
+  rows.sort((x,y)=>y.days-x.days);
+  const od=rows.filter(r=>r.status==="overdue"),late=rows.filter(r=>r.status==="late");
+  const sum=a=>a.reduce((s,r)=>s+r.g,0);
+  // income-tax: unpaid to micro/small past the allowed days at FY end (31 March)
+  const fyEnd=`${fy+1}-03-31`,disallow=S.purchases.filter(p=>{const tm=purTerms(p);return tm.msme&&p.date<=fyEnd&&(!p.paidOn||p.paidOn>fyEnd)&&tm.msmeDue<fyEnd}).reduce((s,p)=>s+docCalc(p).grand,0);
+  sub._export=()=>[["Supplier","Category","Udyam no","PAN","Bill no","Bill date","Amount","Allowed days","Due date","Paid on","Days delayed","Status","Reason for delay"],
+    ...rows.map(r=>[r.tm.v.name||r.p.party?.name,r.tm.v.msme,r.tm.v.udyam||"",r.tm.v.pan||"",r.p.billNo,fmtDate(r.p.date),r.g,r.tm.legal,fmtDate(r.tm.msmeDue),fmtDate(r.p.paidOn||""),r.days,r.status==="late"?"Paid late":"Outstanding",""])];
+  sub._file=`MSME_dues_FY${fy}-${String(fy+1).slice(2)}_${h}.csv`;
+  return `<div class="filters"><label class="f"><span>Financial year</span><select class="input" id="msFY">${fyOptions(fy)}</select></label>
+    <div class="seg" role="group" aria-label="Half year"><button type="button" data-half="H1" aria-pressed="${h==="H1"}">Apr–Sep<small>Form 1 due 31 Oct</small></button><button type="button" data-half="H2" aria-pressed="${h==="H2"}">Oct–Mar<small>Form 1 due 30 Apr</small></button></div>
+    <div class="row" style="margin-left:auto"><button class="btn sm" data-act="exportReport">Export CSV</button></div></div>
+  ${msmeV.length?"":`<div class="banner">No vendors are marked Micro or Small yet. Open Vendors, edit a supplier and set their MSME category and Udyam number.</div>`}
+  <div class="tiles">
+   <div class="tile t-stock"><span class="ib">${ic("clock")}</span><div class="k">Outstanding past due</div><div class="v">${money(sum(od))}</div><div class="n">${od.length} ${od.length===1?"bill":"bills"} as of ${fmtDate(refDate)}</div></div>
+   <div class="tile t-buy"><span class="ib">${ic("check")}</span><div class="k">Paid late in period</div><div class="v">${money(sum(late))}</div><div class="n">${late.length} ${late.length===1?"bill":"bills"} paid after the limit</div></div>
+   <div class="tile t-cash"><span class="ib">${ic("customers")}</span><div class="k">MSME suppliers</div><div class="v">${msmeV.length}</div><div class="n">Micro and small only</div></div>
+   <div class="tile t-sales"><span class="ib">${ic("rupee")}</span><div class="k">Expense at risk on 31 Mar</div><div class="v">${money(disallow)}</div><div class="n">Unpaid past the limit at FY end</div></div>
+  </div>
+  <div class="tablewrap">${rows.length?`<table><thead><tr><th>Supplier</th><th>Udyam no.</th><th>Bill</th><th class="num">Amount</th><th>Must pay by</th><th>Paid on</th><th class="num">Days late</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(r=>`<tr><td><b>${esc(r.tm.v.name||r.p.party?.name)}</b><div class="hint">${esc(r.tm.v.msme||"")} · PAN ${esc(r.tm.v.pan||"—")}</div></td><td class="mono">${esc(r.tm.v.udyam||"—")}</td><td class="mono">${esc(r.p.billNo)}<div class="hint">${fmtDate(r.p.date)}</div></td><td class="num">${amt(r.g)}</td><td class="mono">${fmtDate(r.tm.msmeDue)}<div class="hint">${r.tm.legal} days</div></td><td class="mono">${r.p.paidOn?fmtDate(r.p.paidOn):"—"}</td><td class="num">${r.days}</td><td>${r.status==="late"?'<span class="chip warn">Paid late</span>':'<span class="chip bad">Outstanding</span>'}</td><td>${r.p.paidOn?"":`<button class="btn sm" data-pay-pur="${r.p.id}">Mark paid</button>`}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No delayed MSME payments in this period</b>Bills from Micro and Small suppliers paid within the limit don't appear here.</div>`}</div>
+  <p class="hint" style="margin-top:10px">Under the MSMED Act, Micro and Small suppliers must be paid within the agreed credit period, capped at 45 days, or within 15 days if there is no written agreement. Late payment attracts compound interest at three times the RBI bank rate. Companies report dues outstanding beyond 45 days in MSME Form 1 to the MCA (Apr–Sep by 31 Oct, Oct–Mar by 30 Apr); the CSV lists the details asked for. For income tax, amounts owed to micro and small enterprises and not paid within the allowed days can't be claimed as an expense until the year they are paid (old section 43B(h)). Confirm the treatment with your CA.</p>`;
 }
 
 function gstr1(){
@@ -1100,10 +1350,14 @@ function vSettings(){
   </div>
   <div id="stErr"></div><div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn pri" id="saveSettings">Save settings</button></div></div>
   <div class="panel" style="max-width:860px;margin-top:16px"><h2>Data</h2>
-   <p class="muted" style="margin-top:0">${backend?.kind==="db"?"Records are saved to this page's own storage and stay in sync wherever you open it.":NATIVE?"Records are saved on this tablet. Uninstalling the app or clearing its data deletes them.":"Records are saved in this browser only."} Download a backup regularly.</p>
+   <p class="muted" style="margin-top:0">${backend?.kind==="db"?"Records are saved to this page's own storage and stay in sync wherever you open it.":NATIVE?`Records are saved on this ${DEVICE}. Uninstalling the app or clearing its data deletes them.`:"Records are saved in this browser only."} Download a backup regularly.</p>
    <div class="row"><button class="btn" data-act="backup">Download backup (.json)</button><label class="btn" for="restoreF">Restore from backup…</label><input type="file" id="restoreF" accept=".json,application/json" hidden></div>
    ${hasSample?`<div style="margin-top:14px"><p class="muted">Sample records are marked <span class="chip sample">Sample</span>. Remove them before you start real billing.</p><button class="btn danger" data-act="clearSample">Remove sample data</button></div>`:""}
-   <div id="dataMsg"></div></div>`;
+   <div id="dataMsg"></div></div>
+  <div class="panel" style="max-width:860px;margin-top:16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+   <div class="brand" style="color:var(--ink);padding:0"><i></i></div>
+   <div style="flex:1;min-width:200px"><b>Ledgerbook ${APP_VERSION}</b> · GST billing, stock and returns for small businesses<div class="hint">Developed by <b style="color:var(--ink)">${DEVELOPER}</b>${NATIVE?` · ${DESKTOP?"Windows app":"Android app"}${NATIVE.appVersion?" "+esc(NATIVE.appVersion()):""}`:" · Web version"}</div></div>
+  </div>`;
 }
 
 /* ---------- bindings ---------- */
@@ -1111,6 +1365,7 @@ function bindView(){
   const m=$("#main");
   const debounce=(id,key)=>{const el=$(id);if(!el)return;el.addEventListener("input",()=>{sub[key]=el.value;clearTimeout(el._t);el._t=setTimeout(()=>{const pos=el.selectionStart;renderView();const n=$(id);if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch(e){}}},180)})};
   debounce("#itemQ","q");debounce("#invQ","q");debounce("#partyQ","q");debounce("#saleQ","q");debounce("#purQ","q");
+  for(const id of ["#tdsFY","#msFY"]){const el=$(id);if(el)el.addEventListener("change",()=>{sub.fy=+el.value;renderView()})}
   for(const [id,k] of [["#sFrom","from"],["#sTo","to"],["#rFrom","from"],["#rTo","to"]]){const el=$(id);if(el)el.addEventListener("change",()=>{sub[k]=el.value;renderView()})}
   if($("#saveSettings"))$("#saveSettings").onclick=async()=>{
     const g=$("#st_gstin").value.trim().toUpperCase(),stc=$("#st_state").value;
@@ -1142,9 +1397,13 @@ function bindView(){
 $("#main").addEventListener("click",async e=>{
   const t=e.target.closest("button,[data-go]");if(!t)return;
   if(t.dataset.go)return go(t.dataset.go);
-  if(t.dataset.tab){sub={...sub,tab:t.dataset.tab,part:sub.part};return renderView()}
+  if(t.dataset.tab){sub={tab:t.dataset.tab,part:sub.part,from:sub.from,to:sub.to,fy:sub.fy};return renderView()}
   if(t.dataset.part){sub.part=t.dataset.part;return renderView()}
   if(t.dataset.hsntab){sub.hsnTab=t.dataset.hsntab;return renderView()}
+  if(t.dataset.q4){sub.q4=t.dataset.q4;return renderView()}
+  if(t.dataset.half){sub.half=t.dataset.half;return renderView()}
+  if(t.dataset.editTds)return openTdsForm(t.dataset.editTds);
+  if(t.dataset.payPur){const pu=byId("purchases",t.dataset.payPur);if(pu){await guard(()=>backend.put("purchases",{...pu,paidOn:todayISO()}));toast(`Bill ${pu.billNo} marked paid today`)}return}
   if(t.dataset.range){const [a,b]=t.dataset.range.split(",");sub.from=a;sub.to=b;return renderView()}
   if(t.dataset.editItem)return openItemForm(t.dataset.editItem);
   if(t.dataset.editParty){const [c,id]=t.dataset.editParty.split(":");return openPartyForm(c,id)}
@@ -1156,9 +1415,10 @@ $("#main").addEventListener("click",async e=>{
   if(a==="newPurchase")openPurchaseForm();
   if(a==="newCustomer")openPartyForm("customers");
   if(a==="newVendor")openPartyForm("vendors");
+  if(a==="newTds")openTdsForm();
   if(a==="exportReport"&&sub._export)saveFile(sub._file,csv(sub._export()),"text/csv");
   if(a==="exportStock")saveFile(`stock_${todayISO()}.csv`,csv([["SKU","Item","HSN","Unit","Opening","Purchased","Sold","In stock","Value at cost"],...S.items.map(i=>{const s=stockOf(i.id);return [i.sku,i.name,i.hsn,i.unit,s.open,s.inQ,s.outQ,s.bal,r2(s.bal*num(i.purchasePrice))]})]),"text/csv");
-  if(a==="backup"){const counters={};for(const s of S.sales)counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));saveFile(`ledgerbook-backup_${todayISO()}.json`,JSON.stringify({app:"ledgerbook",v:1,at:new Date().toISOString(),settings:S.settings,counters:{...counters,...S.counters},items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales},null,1),"application/json")}
+  if(a==="backup"){const counters={};for(const s of S.sales)counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));saveFile(`ledgerbook-backup_${todayISO()}.json`,JSON.stringify({app:"ledgerbook",v:1,at:new Date().toISOString(),settings:S.settings,counters:{...counters,...S.counters},items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds},null,1),"application/json")}
   if(a==="clearSample"){confirmIn("#dataMsg","Remove every record marked Sample? Real records stay.",async()=>{
     for(const c of COLLS)for(const o of S[c].filter(x=>x.sample))await backend.remove(c,o.id);
     const counters={};for(const s of S.sales.filter(x=>!x.sample))counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));
@@ -1176,7 +1436,7 @@ window.__onBack=()=>{if($("#modalRoot").firstChild){closeModal();return true}if(
     try{downloadsNS=await window.claude.use("downloads")}catch(e){}
   }
   if(db){backend=dbBackend(db);$("#storeDot").className="dot ok";$("#storeText").textContent="Saved to this page's storage · synced"}
-  else{backend=await localBackend();$("#storeDot").className="dot "+(NATIVE?"ok":"local");$("#storeText").textContent=NATIVE?"Saved on this tablet":"Saved in this browser only";}
+  else{backend=await localBackend();$("#storeDot").className="dot "+(NATIVE?"ok":"local");$("#storeText").textContent=NATIVE?`Saved on this ${DEVICE}`:"Saved in this browser only";}
   if(NATIVE)setTimeout(()=>loadPdfLib().catch(()=>{}),1500);
   renderShell();renderView();
 })();
