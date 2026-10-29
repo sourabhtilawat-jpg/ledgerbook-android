@@ -5,8 +5,7 @@ Usage: python3 tools/build_index.py path/to/ledgerbook.html"""
 import re, sys, pathlib
 src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 root = pathlib.Path(__file__).resolve().parent.parent
-faces = [("Bricolage Grotesque", "bricolage-grotesque", w) for w in (600, 700)] + \
-        [("IBM Plex Sans", "ibm-plex-sans", w) for w in (400, 500, 600)] + \
+faces = [("IBM Plex Sans", "ibm-plex-sans", w) for w in (400, 500, 600, 700)] + \
         [("IBM Plex Mono", "ibm-plex-mono", w) for w in (400, 500)]
 font_css = "".join(
     f'@font-face{{font-family:"{fam}";font-style:normal;font-weight:{w};font-display:swap;'
