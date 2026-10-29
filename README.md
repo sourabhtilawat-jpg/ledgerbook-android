@@ -109,3 +109,14 @@ Always use **https://** for a cloud server.
 - Two people editing the same record: the second save is refused with a message and the record
   refreshes, so nobody overwrites someone else's work. Invoice numbers come from the server, so two
   counters billing at once never get the same number.
+
+## GST portal, e-way bills and e-invoices (v1.5)
+
+Ledgerbook prepares the files the government portals accept; you sign in and upload them there.
+
+- **GSTR-1**: Reports → GSTR-1 (or the *GST & E-way* page) → *Download GSTR-1 JSON*. On gst.gov.in: Returns Dashboard → GSTR-1 → Prepare Offline → Upload.
+- **E-way bill**: open an invoice → *E-way bill* → fill Part B (vehicle / transporter) → *Download e-way bill JSON*. On ewaybillgst.gov.in: E-waybill → Generate Bulk. Type the 12-digit EWB number back into Ledgerbook and it prints on the invoice.
+- **E-invoice (IRN)**: turn it on in Settings if your turnover is above ₹5 crore. Download the INV-01 JSON, upload on the IRP, then paste the IRN, Ack no and signed QR back. The QR prints on the invoice.
+- Filing straight from the app (no upload) needs a GST Suvidha Provider (GSP) account and an API user on the portal.
+
+Also new: credit notes (sales returns), debit notes (purchase returns), quotations that convert to invoices, outstanding receivables/payables with ageing and WhatsApp reminders, day book, GSTIN checksum validation, and MRP-style prices that include GST.

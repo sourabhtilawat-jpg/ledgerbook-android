@@ -1,6 +1,6 @@
 {
   "name": "ledgerbook-server",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Ledgerbook Server: shared books, users, rights and audit trail. Developed by Sourabh Tilawat.",
   "author": "Sourabh Tilawat",
   "license": "UNLICENSED",

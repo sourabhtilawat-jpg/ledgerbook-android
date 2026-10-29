@@ -14,8 +14,8 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 
-const VERSION = "1.4.0";
-const COLLS = ["items", "customers", "vendors", "purchases", "sales", "tds", "ledgers", "vouchers"];
+const VERSION = "1.5.0";
+const COLLS = ["items", "customers", "vendors", "purchases", "sales", "tds", "ledgers", "vouchers", "creditNotes", "debitNotes", "quotes"];
 const RIGHTS = [
   ["sales.view", "Sales: view invoices"], ["sales.create", "Sales: create invoices"], ["sales.payment", "Sales: collect payments"],
   ["sales.edit", "Sales: edit invoices"], ["sales.cancel", "Sales: cancel invoices"],
@@ -108,6 +108,7 @@ function createLedgerbookServer(opts = {}) {
       case "items": return `${d.sku || ""} · ${d.name || ""}`;
       case "vouchers": return `${d.type || ""} ${d.no || ""}`;
       case "tds": return `TDS · ${d.payee || ""}`;
+      case "creditNotes": case "debitNotes": case "quotes": return `${d.no || ""} · ${(d.party && d.party.name) || ""}`;
       default: return d.name || d.id || "";
     }
   };
@@ -173,6 +174,9 @@ function createLedgerbookServer(opts = {}) {
       case "vendors": return ["parties.edit", "purchases.edit"];
       case "tds": return ["taxes.edit", "purchases.edit"];
       case "ledgers": case "vouchers": return ["accounts.edit"];
+      case "creditNotes": return ["sales.edit", "sales.cancel"];
+      case "debitNotes": return ["purchases.edit"];
+      case "quotes": return ["sales.create", "sales.edit"];
       default: return ["__none__"];
     }
   }
@@ -262,7 +266,7 @@ function createLedgerbookServer(opts = {}) {
         return;
       }
       let m;
-      if ((m = p.match(/^\/api\/doc\/([a-z]+)\/([A-Za-z0-9_\-.~:@+]{1,200})$/))) {
+      if ((m = p.match(/^\/api\/doc\/([A-Za-z]+)\/([A-Za-z0-9_\-.~:@+]{1,200})$/))) {
         const c = m[1], id = decodeURIComponent(m[2]);
         if (!COLLS.includes(c)) return send(res, 404, { error: "Unknown record type." });
         const before = db.colls[c][id] || null;

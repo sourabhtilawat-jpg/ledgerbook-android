@@ -243,8 +243,8 @@ const STATES=[["01","Jammu & Kashmir"],["02","Himachal Pradesh"],["03","Punjab"]
 const STATE_NAME=Object.fromEntries(STATES);
 const GST_RATES=[0,0.25,3,5,12,18,28,40];
 const UNITS=["PCS","NOS","BOX","BAG","KGS","GMS","LTR","MTR","SET","PAC","DOZ","BTL","ROL","SQM"];
-const COLLS=["items","customers","vendors","purchases","sales","tds","ledgers","vouchers"];
-const APP_VERSION="1.4";
+const COLLS=["items","customers","vendors","purchases","sales","tds","ledgers","vouchers","creditNotes","debitNotes","quotes"];
+const APP_VERSION="1.5";
 const DEVELOPER="Sourabh Tilawat";
 /* TDS on resident payments under section 393(1), Income-tax Act 2025 (from 1 Apr 2026). Old 1961-Act section shown for familiarity.
    Rates per published FY 2026-27 rate charts; payment codes are left for the user because published code lists differ. */
@@ -286,13 +286,14 @@ const ICON={
   clock:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   check:'<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   search:'<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.4-4.4"/>',
+  gst:'<path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4M8.5 12.5h7M8.5 16h7M8.5 9h3"/>',
   rupee:'<path d="M7 4.5h10M7 9h10M7 4.5h3.5a4.5 4.5 0 0 1 0 9H7l8 6.5"/>',
 };
 const ic=n=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||""}</svg>`;
-const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["accounts","Accounts"],["sep"],["audit","Audit trail"],["users","Users & rights"],["settings","Settings"]];
+const VIEWS=[["dashboard","Dashboard"],["sales","Sales invoices","S"],["purchases","Purchases","P"],["inventory","Inventory"],["items","Items & HSN"],["sep"],["customers","Customers"],["vendors","Vendors"],["reports","Reports"],["gst","GST & E-way"],["accounts","Accounts"],["sep"],["audit","Audit trail"],["users","Users & rights"],["settings","Settings"]];
 
 /* ---------- state ---------- */
-const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],ledgers:[],vouchers:[],audit:[],settings:{},counters:{}};
+const S={items:[],customers:[],vendors:[],purchases:[],sales:[],tds:[],ledgers:[],vouchers:[],creditNotes:[],debitNotes:[],quotes:[],audit:[],settings:{},counters:{}};
 let READY=false;
 let view="dashboard", sub={}, backend=null, renderQueued=false;
 const TAB=Math.random().toString(36).slice(2);
@@ -352,6 +353,8 @@ function stockOf(itemId){
   const it=byId("items",itemId);let inQ=0,outQ=0;
   for(const p of S.purchases)for(const l of p.lines||[])if(l.itemId===itemId)inQ+=num(l.qty);
   for(const s of S.sales)if(s.status!=="cancelled")for(const l of s.lines||[])if(l.itemId===itemId)outQ+=num(l.qty);
+  for(const n of S.creditNotes)if(n.status!=="cancelled"&&n.restock)for(const l of n.lines||[])if(l.itemId===itemId)outQ-=num(l.qty);
+  for(const n of S.debitNotes)if(n.status!=="cancelled"&&n.restock)for(const l of n.lines||[])if(l.itemId===itemId)inQ-=num(l.qty);
   const open=num(it?.openingStock);return {open,inQ,outQ,bal:open+inQ-outQ};
 }
 
@@ -376,7 +379,7 @@ async function localBackend(){
   const tx=(mode,fn)=>new Promise((res,rej)=>{const t=idb.transaction("kv",mode);const st=t.objectStore("kv");const out=fn(st);t.oncomplete=()=>res(out&&out.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)});
   const idbPut=(k,v)=>tx("readwrite",st=>st.put(v,k));
   const idbDel=k=>tx("readwrite",st=>st.delete(k));
-  const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
+  const persistLS=()=>{try{localStorage.setItem(OLD,JSON.stringify({items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers,creditNotes:S.creditNotes,debitNotes:S.debitNotes,quotes:S.quotes,settings:S.settings,counters:S.counters}))}catch(e){toast("Could not save: storage is blocked or full")}};
   if(idb){
     const all=await new Promise((res,rej)=>{const out=[];const t=idb.transaction("kv","readonly");const c=t.objectStore("kv").openCursor();c.onsuccess=()=>{const cur=c.result;if(cur){out.push([cur.key,cur.value]);cur.continue()}else res(out)};c.onerror=()=>rej(c.error)});
     for(const [k,v] of all){const [coll]=String(k).split("/");if(COLLS.includes(coll))S[coll].push(v);else if(coll==="audit")S.audit.push(v);else if(k==="settings")S.settings=v;else if(k==="counters")S.counters=v}
@@ -454,7 +457,7 @@ function loadPdfLib(){
 }
 const fileBase=s=>s.no.replace(/[\/\\:*?"<>|]/g,"-");
 async function invoicePDF(s){
-  await loadPdfLib();
+  await loadPdfLib();if(s.irn?.qr)await loadQrLib().catch(()=>{});
   const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:"mm",format:"a4"});
   const c=docCalc(s),B=S.settings,inter=s.inter,W=210,M=12;const n=v=>inr.format(v);
   const addr=a=>[a?.line,a?.city,(STATE_NAME[a?.state]||"")+(a?.pin?" - "+a.pin:"")].filter(Boolean).join(", ");
@@ -463,12 +466,14 @@ async function invoicePDF(s){
   doc.setFont("helvetica","normal");doc.setFontSize(9);
   const bl=doc.splitTextToSize([B.address,STATE_NAME[B.state]].filter(Boolean).join(", "),110);doc.text(bl,M,21);
   let y=21+bl.length*4;const contact=[B.gstin?"GSTIN: "+B.gstin:"",B.phone?"Ph: "+B.phone:"",B.email||""].filter(Boolean).join("   ");if(contact){doc.text(contact,M,y);y+=4}
-  doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(10,74,67);doc.text("TAX INVOICE",W-M,16,{align:"right"});doc.setTextColor(0);
+  doc.setFont("helvetica","bold");doc.setFontSize(13);doc.setTextColor(10,74,67);doc.text(s.docTitle||"TAX INVOICE",W-M,16,{align:"right"});doc.setTextColor(0);
   doc.setFontSize(9);doc.setFont("helvetica","normal");
-  const meta=[["Invoice No",s.no],["Date",fmtDate(s.date)],["Place of supply",stateLabel(s.pos)]];if(s.ref)meta.push(["Reference",s.ref]);
+  const meta=[[s.docTitle?"No":"Invoice No",s.no],["Date",fmtDate(s.date)],["Place of supply",stateLabel(s.pos)]];if(s.ref)meta.push(["Reference",s.ref]);if(s.ewb?.no)meta.push(["E-way bill",s.ewb.no]);if(s.irn?.ackNo)meta.push(["Ack no",s.irn.ackNo]);
   meta.forEach(([k,v],i)=>{doc.text(k+": ",W-M-62,22+i*4.5);doc.setFont("helvetica","bold");doc.text(String(v),W-M,22+i*4.5,{align:"right"});doc.setFont("helvetica","normal")});
   if(s.status==="cancelled"){doc.setTextColor(176,40,31);doc.setFont("helvetica","bold");doc.text("CANCELLED",W-M,22+meta.length*4.5,{align:"right"});doc.setTextColor(0);doc.setFont("helvetica","normal")}
   y=Math.max(y,24+meta.length*4.5)+2;doc.setLineWidth(.5);doc.line(M,y,W-M,y);y+=2;
+  if(s.irn?.irn){const q=s.irn.qr?irnQrDataUrl(s.irn.qr):"";if(q)doc.addImage(q,"PNG",M,y+1,26,26);doc.setFontSize(7.5);doc.text(doc.splitTextToSize("IRN: "+s.irn.irn,W-2*M-(q?30:0)),M+(q?30:0),y+5);doc.setFontSize(9);y+=q?29:8}
+  if(s.noteRef){doc.setFontSize(8.5);const t=doc.splitTextToSize(s.noteRef,W-2*M);doc.text(t,M,y+4);y+=t.length*4+2;doc.setFontSize(9)}
   const party=s.party||{};
   doc.autoTable({startY:y,margin:{left:M,right:M},theme:"grid",styles:{fontSize:8.5,cellPadding:2,lineColor:[190,196,193],textColor:20},headStyles:{fillColor:[233,242,239],textColor:20,fontStyle:"bold"},
     head:[saleType(s)==="b2c"&&!s.partyId?["Customer","Place of supply"]:["Bill to","Ship to"]],
@@ -482,9 +487,9 @@ async function invoicePDF(s){
     columnStyles:{0:{cellWidth:7},1:{cellWidth:inter?50:42},...right}});
   y=doc.lastAutoTable.finalY+4;
   if(y>230){doc.addPage();y=16}
-  const sumRows=[["Taxable value",n(c.taxable)],...(inter?[["IGST",n(c.igst)]]:[["CGST",n(c.cgst)],["SGST",n(c.sgst)]]),["Round off",n(c.round)],["Grand total","Rs. "+n(c.grand)],["Payment",payInfo(s).label]];
+  const sumRows=[["Taxable value",n(c.taxable)],...(inter?[["IGST",n(c.igst)]]:[["CGST",n(c.cgst)],["SGST",n(c.sgst)]]),["Round off",n(c.round)],["Grand total","Rs. "+n(c.grand)],...(s.docTitle?[]:[["Payment",payInfo(s).label]])];
   doc.autoTable({startY:y,margin:{left:W-M-70,right:M},tableWidth:70,theme:"grid",body:sumRows,styles:{fontSize:9,cellPadding:1.8,lineColor:[190,196,193],textColor:20},columnStyles:{1:{halign:"right"}},
-    didParseCell:d=>{if(d.row.index===sumRows.length-2)d.cell.styles.fontStyle="bold";if(d.row.index===sumRows.length-1){d.cell.styles.fontStyle="bold";d.cell.styles.fontSize=8;const paid=payInfo(s).status==="paid";d.cell.styles.fillColor=paid?[223,243,230]:[252,239,214];d.cell.styles.textColor=paid?[31,122,69]:[138,83,0]}}});
+    didParseCell:d=>{if(s.docTitle){if(d.row.index===sumRows.length-1)d.cell.styles.fontStyle="bold";return}if(d.row.index===sumRows.length-2)d.cell.styles.fontStyle="bold";if(d.row.index===sumRows.length-1){d.cell.styles.fontStyle="bold";d.cell.styles.fontSize=8;const paid=payInfo(s).status==="paid";d.cell.styles.fillColor=paid?[223,243,230]:[252,239,214];d.cell.styles.textColor=paid?[31,122,69]:[138,83,0]}}});
   const yR=doc.lastAutoTable.finalY;
   const hsn={};for(const l of c.lines){const k=l.hsn+"|"+l.gst;(hsn[k]=hsn[k]||{hsn:l.hsn,gst:l.gst,tx:0,c:0,s:0,i:0});hsn[k].tx+=l.taxable;hsn[k].c+=l.cgst;hsn[k].s+=l.sgst;hsn[k].i+=l.igst}
   doc.setFontSize(9);const wl=doc.splitTextToSize("Amount in words: Rupees "+words(c.grand)+" Only",W-2*M-78);doc.setFont("helvetica","bold");doc.text(wl,M,y+3);doc.setFont("helvetica","normal");
@@ -565,7 +570,7 @@ document.addEventListener("keydown",e=>{if($("#modalRoot").firstChild){if(e.key=
 
 function renderView(){
   const m=$("#main");
-  const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,accounts:vAccounts,audit:vAudit,users:vUsers,settings:vSettings}[viewAllowed(view)?view:(view="dashboard")]||vDash;
+  const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,gst:vGst,accounts:vAccounts,audit:vAudit,users:vUsers,settings:vSettings}[viewAllowed(view)?view:(view="dashboard")]||vDash;
   m.innerHTML=(SRV?`<div class="banner" id="connBanner"${CONN_OK?" hidden":""}>Lost connection to the server. Changes can't be saved until it's back; Ledgerbook keeps trying.</div>`:"")+(backend?.kind==="local"&&!NATIVE?`<div class="banner">Your data is saved in this browser only. Use Settings → Backup to keep a copy, or connect to a Ledgerbook Server.</div>`:"")+fn();
   bindView();
 }
@@ -646,13 +651,14 @@ function openItemForm(id){
    <label class="f"><span>Opening stock</span><input class="input" id="i_os" type="number" step="any" value="${it.openingStock??0}"></label>
    <label class="f"><span>Reorder level</span><input class="input" id="i_rl" type="number" step="any" min="0" value="${it.reorderLevel??0}"></label>
    <label class="f span2"><span>Description (optional)</span><input class="input" id="i_desc" value="${esc(it.desc)}"></label>
+   <label class="check span2"><input type="checkbox" id="i_incl"${it.priceIncl?" checked":""}> Sale price includes GST (MRP-style pricing)</label>
    <div class="spanall" id="itemErr"></div></form>`,
    `${id&&!used?`<button class="btn danger" id="delItem" style="margin-right:auto">Delete</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="saveItem">${id?"Save changes":"Add item"}</button>`);
   $("#saveItem").onclick=async()=>{
     const v=x=>$(x).value.trim();
     if(!v("#i_name")||!v("#i_sku")||!v("#i_hsn")){$("#itemErr").innerHTML=`<div class="err">Fill in item name, SKU and HSN code.</div>`;return}
     if(S.items.some(x=>x.sku.toLowerCase()===v("#i_sku").toLowerCase()&&x.id!==id)){$("#itemErr").innerHTML=`<div class="err">SKU ${esc(v("#i_sku"))} is already used by another item.</div>`;return}
-    const o={...it,id:id||uid(),name:v("#i_name"),sku:v("#i_sku"),unit:v("#i_unit"),hsn:v("#i_hsn"),gstRate:num(v("#i_gst")),salePrice:num(v("#i_sp")),purchasePrice:num(v("#i_pp")),openingStock:num(v("#i_os")),reorderLevel:num(v("#i_rl")),desc:v("#i_desc")};
+    const o={...it,id:id||uid(),name:v("#i_name"),sku:v("#i_sku"),unit:v("#i_unit"),hsn:v("#i_hsn"),gstRate:num(v("#i_gst")),salePrice:num(v("#i_sp")),purchasePrice:num(v("#i_pp")),openingStock:num(v("#i_os")),reorderLevel:num(v("#i_rl")),desc:v("#i_desc"),priceIncl:$("#i_incl").checked};
     await guard(()=>backend.put("items",o));closeModal();toast(id?"Item saved":"Item added");
   };
   if($("#delItem"))$("#delItem").onclick=()=>confirmIn("#itemErr","Delete this item? It has no transactions.",async()=>{await guard(()=>backend.remove("items",id));closeModal();toast("Item deleted")});
@@ -694,7 +700,7 @@ function openPartyForm(coll,id,after){
   openModal(`${id?"Edit":"Add"} ${isC?"customer":"vendor"}`,`<form id="partyF" class="grid" onsubmit="return false">
    <div class="grid g2">
     <label class="f req"><span>${isC?"Customer":"Vendor"} name</span><input class="input" id="p_name" value="${esc(p.name)}"></label>
-    <label class="f"><span>GSTIN (leave blank if unregistered)</span><input class="input" id="p_gstin" maxlength="15" style="text-transform:uppercase;font-family:var(--f-mono)" value="${esc(p.gstin)}" placeholder="27ABCDE1234F1Z5"></label>
+    <label class="f"><span>GSTIN (leave blank if unregistered)</span><input class="input" id="p_gstin" maxlength="15" style="text-transform:uppercase;font-family:var(--f-mono)" value="${esc(p.gstin)}" placeholder="27ABCDE1234F1Z0"></label>
    </div><div id="gstinMsg" class="hint"></div>
    ${addrBlock("b",p.bill,isC?"Invoice address":"Billing address")}
    <label class="check"><input type="checkbox" id="p_same"${p.same!==false?" checked":""}> ${shipLbl} is the same as ${isC?"invoice":"billing"} address</label>
@@ -718,7 +724,7 @@ function openPartyForm(coll,id,after){
   $("#b_state").addEventListener("change",()=>{if($("#p_same").checked)syncShip()});
   const chkG=()=>{const g=$("#p_gstin").value.trim().toUpperCase();const m=$("#gstinMsg");if(!g){m.textContent="Unregistered party: sales go to B2C in GSTR-1.";m.style.color="";return}
     if(!GSTIN_RE.test(g)){m.textContent="GSTIN format looks wrong: 15 characters, starting with the 2-digit state code.";m.style.color="var(--warn)";return}
-    const sc=g.slice(0,2);m.textContent=`Valid format · State ${sc} ${STATE_NAME[sc]||""} · PAN ${g.slice(2,12)}`;m.style.color="var(--good)";
+    const sc=g.slice(0,2);if(!gstinChecksumOk(g)){m.textContent="The last character (checksum) doesn't match: a character is probably mistyped.";m.style.color="var(--warn)";return}m.textContent=`Valid GSTIN · State ${sc} ${STATE_NAME[sc]||""} · PAN ${g.slice(2,12)}`;m.style.color="var(--good)";
     if(!$("#b_state").value&&STATE_NAME[sc]){$("#b_state").value=sc;if($("#p_same").checked)syncShip()}if(!$("#p_pan").value)$("#p_pan").value=g.slice(2,12)};
   $("#p_gstin").addEventListener("input",chkG);chkG();syncShip();
   $("#saveParty").onclick=async()=>{
@@ -735,6 +741,7 @@ function openPartyForm(coll,id,after){
 }
 
 /* ---------- Line editor (shared by sales + purchases) ---------- */
+const itemRate=(it,key)=>key==="salePrice"&&it.priceIncl?Math.round(num(it.salePrice)/(1+num(it.gstRate)/100)*10000)/10000:num(it[key]);
 function lineEditor(kind,lines,getInter){
   const priceKey=kind==="sale"?"salePrice":"purchasePrice";
   const itemOpts=sel=>`<option value="">Select item</option>`+[...S.items].sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`<option value="${i.id}"${i.id===sel?" selected":""}>${esc(i.name)} · ${esc(i.sku)}</option>`).join("");
@@ -754,7 +761,7 @@ function lineEditor(kind,lines,getInter){
      <div class="sum"><div>Taxable value</div><div>${amt(c.taxable)}</div>${inter?`<div>IGST</div><div>${amt(c.igst)}</div>`:`<div>CGST</div><div>${amt(c.cgst)}</div><div>SGST</div><div>${amt(c.sgst)}</div>`}<div>Round off</div><div>${c.round>=0?"+":""}${amt(c.round)}</div><div class="gt">Total</div><div class="gt">${money(c.grand)}</div></div>`;
   }
   wrap.addEventListener("change",e=>{const tr=e.target.closest("tr[data-i]");if(!tr)return;const l=lines[+tr.dataset.i],k=e.target.dataset.k;
-    if(k==="itemId"){const it=byId("items",e.target.value);l.itemId=e.target.value;if(it){l.name=it.name;l.sku=it.sku;l.hsn=it.hsn;l.unit=it.unit;l.gst=num(it.gstRate);l.rate=num(it[priceKey]);if(!l.qty)l.qty=1}}
+    if(k==="itemId"){const it=byId("items",e.target.value);l.itemId=e.target.value;if(it){l.name=it.name;l.sku=it.sku;l.hsn=it.hsn;l.unit=it.unit;l.gst=num(it.gstRate);l.rate=itemRate(it,priceKey);if(!l.qty)l.qty=1}}
     else l[k]=num(e.target.value);draw()});
   wrap.addEventListener("input",e=>{const tr=e.target.closest("tr[data-i]");if(!tr||e.target.tagName!=="INPUT")return;lines[+tr.dataset.i][e.target.dataset.k]=num(e.target.value);
     const c=calcLines(lines,getInter()),l=c.lines[+tr.dataset.i],tds=tr.children;tds[6].textContent=amt(l.taxable);tds[7].textContent=amt(l.cgst+l.sgst+l.igst);tds[8].innerHTML=`<b>${amt(l.total)}</b>`;
@@ -766,7 +773,7 @@ function lineEditor(kind,lines,getInter){
     const it=byId("items",id);if(!it)return false;
     const ex=lines.find(l=>l.itemId===id);
     if(ex)ex.qty=num(ex.qty)+1;
-    else{let l=lines.find(l=>!l.itemId);if(!l){l={};lines.push(l)}Object.assign(l,{itemId:id,name:it.name,sku:it.sku,hsn:it.hsn,unit:it.unit,gst:num(it.gstRate),rate:num(it[priceKey]),qty:1,disc:0})}
+    else{let l=lines.find(l=>!l.itemId);if(!l){l={};lines.push(l)}Object.assign(l,{itemId:id,name:it.name,sku:it.sku,hsn:it.hsn,unit:it.unit,gst:num(it.gstRate),rate:itemRate(it,priceKey),qty:1,disc:0})}
     draw();return true;
   }
   draw();return {draw,lines,addItem};
@@ -774,6 +781,13 @@ function lineEditor(kind,lines,getInter){
 
 /* ---------- Sales ---------- */
 function vSales(){
+  const st=sub.stab||"inv";
+  const tabs=`<div class="tabs" role="tablist">${[["inv","Invoices"],["quotes",`Quotations (${S.quotes.filter(q=>q.status!=="converted"&&q.status!=="lost").length})`],["cn",`Credit notes (${S.creditNotes.length})`]].map(([k,l])=>`<button role="tab" data-stab="${k}" aria-selected="${st===k}">${l}</button>`).join("")}</div>`;
+  if(st==="quotes")return `<div class="head"><div><h1>Sales</h1><div class="sub">Quotations become invoices in one tap.</div></div></div>`+tabs+quotesTable();
+  if(st==="cn")return `<div class="head"><div><h1>Sales</h1><div class="sub">Credit notes for returns and post-sale discounts. They reduce sales, GST and the customer's dues, and can put goods back into stock.</div></div></div>`+tabs+notesTable("cn");
+  return vSalesInv().replace('<div class="filters">',tabs+'<div class="filters">');
+}
+function vSalesInv(){
   const q=(sub.q||"").toLowerCase();const [d1,d2]=[sub.from||"",sub.to||""];
   const rows=S.sales.filter(s=>(!q||(s.no+" "+s.party?.name+" "+s.party?.gstin+" "+s.party?.phone).toLowerCase().includes(q))&&(!d1||s.date>=d1)&&(!d2||s.date<=d2)).sort((a,b)=>(b.date+String(b.seq).padStart(6,"0")).localeCompare(a.date+String(a.seq).padStart(6,"0")));
   return `<div class="head"><div><h1>Sales invoices</h1><div class="sub">Numbers run in sequence per financial year: ${esc((S.settings.prefix??"INV/")+fyOf(todayISO()))}/0001, 0002… Cancel an invoice instead of deleting it so the series stays unbroken.</div></div><button class="btn pri" data-act="newSale">New sales invoice</button></div>
@@ -786,10 +800,10 @@ function openSaleForm(preset){
   if(!can("sales.create"))return deny();
   if(!S.items.length){toast("Add an item first in Items & HSN");go("items");return}
   const home=S.settings.state||"";
-  const st={mode:preset?.mode||lastSaleMode,partyId:preset?.partyId||"",date:todayISO(),pos:home,lines:[{qty:0,rate:0,disc:0,gst:18}]};
+  const st={mode:preset?.mode||lastSaleMode,partyId:preset?.partyId||"",date:todayISO(),pos:home,lines:preset?.lines?.length?preset.lines:[{qty:0,rate:0,disc:0,gst:18}],quote:!!preset?.quote,fromQuote:preset?.fromQuote||null};
   const custOpts=()=>`<option value="">Select customer</option>`+[...S.customers].sort((a,b)=>a.name.localeCompare(b.name)).map(c=>`<option value="${c.id}"${c.id===st.partyId?" selected":""}>${esc(c.name)}${c.gstin?" · "+c.gstin:""}</option>`).join("");
   const skuOpts=[...S.items].sort((a,b)=>a.name.localeCompare(b.name)).map(i=>`<option value="${esc(i.sku)} — ${esc(i.name)}"></option>`).join("");
-  openModal("New sales invoice",`
+  openModal(st.quote?"New quotation":st.fromQuote?"Invoice from quotation":"New sales invoice",`
    <div class="row" style="justify-content:space-between;align-items:flex-end;margin-bottom:14px">
     <div class="seg" role="group" aria-label="Invoice type">
      <button type="button" data-mode="b2c" aria-pressed="${st.mode==="b2c"}">B2C · Walk-in<small>Name and mobile only</small></button>
@@ -821,7 +835,8 @@ function openSaleForm(preset){
    <div id="lines"></div>
    <label class="f" style="margin-top:12px"><span>Notes on invoice (optional)</span><input class="input" id="so_notes" value="${esc(S.settings.invNote||"")}"></label>
    <div id="saleErr"></div>`,
-   `<button class="btn" data-close>Cancel</button><button class="btn pri lg" id="saveSale">${ic("check")} Save &amp; collect payment</button>`,{wide:true,noFocus:true});
+   `${st.quote?`<label class="f" style="margin-right:auto;width:180px"><span>Valid till</span><input class="input" type="date" id="so_valid" value="${addDays(todayISO(),15)}"></label>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri lg" id="saveSale">${ic("check")} ${st.quote?"Save quotation":"Save &amp; collect payment"}</button>`,{wide:true,noFocus:true});
+  if(preset?.b2c){$("#so_phone").value=preset.b2c.phone||"";$("#so_name").value=preset.b2c.name||"";$("#so_addr").value=preset.b2c.addr||""}
   const inter=()=>!!(home&&st.pos&&st.pos!==home);
   const showKind=()=>{$("#so_kind").innerHTML=st.pos?(inter()?`<span class="chip warn">Inter-state · IGST</span>`:`<span class="chip good">Intra-state · CGST + SGST</span>`):""};
   const le=lineEditor("sale",st.lines,inter);showKind();
@@ -865,6 +880,9 @@ function wireSaleSave(st,inter){
     }
     if(!date)return err("Choose an invoice date.");if(!st.pos)return err("Choose the place of supply.");if(!lines.length)return err("Add at least one item. Type or scan its SKU in the search bar.");
     const short=lines.map(l=>{const it=byId("items",l.itemId);const need=lines.filter(x=>x.itemId===l.itemId).reduce((a,x)=>a+num(x.qty),0);return stockOf(l.itemId).bal<need?it.name:null}).filter(Boolean);
+    if(st.quote){$("#saveSale").disabled=true;try{const {fy,seq,no}=await nextDocNo("QT","QT",date);
+        const q={id:uid(),no,fy,seq,date,validTill:$("#so_valid").value||"",type:st.mode,partyId,party,pos:st.pos,inter:inter(),lines:lines.map(l=>({itemId:l.itemId,name:l.name,sku:l.sku,hsn:l.hsn,unit:l.unit,qty:num(l.qty),rate:num(l.rate),disc:num(l.disc),gst:num(l.gst)})),notes:$("#so_notes").value.trim(),status:"open",created:new Date().toISOString()};
+        q.grand=docCalc(q).grand;await guard(()=>backend.put("quotes",q));closeModal();toast(`Quotation ${no} saved`);viewQuote(q.id)}catch(e){$("#saveSale").disabled=false}return}
     if(short.length&&!st.okShort){st.okShort=true;return err(`Not enough stock for ${[...new Set(short)].map(esc).join(", ")}. Tap Save again to bill anyway (stock will go negative).`)}
     $("#saveSale").disabled=true;
     try{
@@ -874,6 +892,7 @@ function wireSaleSave(st,inter){
         ref:st.mode==="b2b"?$("#so_ref").value.trim():"",notes:$("#so_notes").value.trim(),status:"active",created:new Date().toISOString()};
       o.grand=docCalc(o).grand;
       await guard(()=>backend.put("sales",o));S.sales.some(x=>x.id===o.id)||S.sales.push(o);closeModal();toast(`Invoice ${no} saved`);
+      if(st.fromQuote){const q=byId("quotes",st.fromQuote);if(q)backend.put("quotes",{...q,status:"converted",convertedTo:no}).catch(()=>{})}
       openPayment(o.id,true);
     }catch(e){$("#saveSale").disabled=false}
   };
@@ -951,8 +970,10 @@ function invoiceHTML(s,standalone){
   <div style="height:5px;background:#0A4A43;margin:-22px -22px 16px;border-radius:7px 7px 0 0"></div>
   <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:2px solid #0A4A43;padding-bottom:10px;margin-bottom:10px">
    <div><div style="font-size:18px;font-weight:700">${esc(B.name||"Your Business Name")}</div><div>${esc(B.address||"")}${B.state?`, ${esc(STATE_NAME[B.state])}`:""}</div><div>${B.gstin?`GSTIN: <b>${esc(B.gstin)}</b>`:""}${B.phone?` · Ph: ${esc(B.phone)}`:""}${B.email?` · ${esc(B.email)}`:""}</div></div>
-   <div style="text-align:right"><div style="font-size:16px;font-weight:700;letter-spacing:.08em;color:#0A4A43">TAX INVOICE</div>${s.status==="cancelled"?`<div style="color:#b0281f;font-weight:700">CANCELLED</div>`:""}<div>Invoice No: <b>${esc(s.no)}</b></div><div>Date: <b>${fmtDate(s.date)}</b></div><div>Place of supply: ${esc(stateLabel(s.pos))}</div>${s.ref?`<div>Ref: ${esc(s.ref)}</div>`:""}</div>
+   <div style="text-align:right"><div style="font-size:16px;font-weight:700;letter-spacing:.08em;color:#0A4A43">${esc(s.docTitle||"TAX INVOICE")}</div>${s.status==="cancelled"?`<div style="color:#b0281f;font-weight:700">CANCELLED</div>`:""}<div>${s.docTitle?"No":"Invoice No"}: <b>${esc(s.no)}</b></div>${s.ewb?.no?`<div>E-way bill: <b>${esc(s.ewb.no)}</b></div>`:""}${s.irn?.ackNo?`<div>Ack no: ${esc(s.irn.ackNo)}${s.irn.ackDate?" · "+fmtDate(s.irn.ackDate):""}</div>`:""}<div>Date: <b>${fmtDate(s.date)}</b></div><div>Place of supply: ${esc(stateLabel(s.pos))}</div>${s.ref?`<div>Ref: ${esc(s.ref)}</div>`:""}</div>
   </div>
+  ${s.irn?.irn?`<div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;font-size:11px">${s.irn.qr?irnQrSvg(s.irn.qr,110):""}<div><b>IRN:</b> <span style="font-family:monospace;word-break:break-all">${esc(s.irn.irn)}</span></div></div>`:""}
+  ${s.noteRef?`<div style="margin-bottom:10px;padding:6px 10px;background:#F3F7F6;border-left:3px solid #0A4A43">${esc(s.noteRef)}</div>`:""}
   ${saleType(s)==="b2c"&&!s.partyId?`<table style="margin-bottom:10px"><tr><th style="width:50%">Customer</th><th>Place of supply</th></tr><tr><td><b>${esc(s.party.name)}</b>${s.party.phone?`<br>Mobile: ${esc(s.party.phone)}`:""}${s.party.bill?.line?`<br>${esc(s.party.bill.line)}`:""}</td><td>${esc(stateLabel(s.pos))}<br>Unregistered (B2C)</td></tr></table>`:`<table style="margin-bottom:10px"><tr><th style="width:50%">Bill to</th><th>Ship to</th></tr><tr><td><b>${esc(s.party.name)}</b><br>${addr(s.party.bill)}<br>${s.party.gstin?`GSTIN: <b>${esc(s.party.gstin)}</b>`:"Unregistered"}${s.party.phone?`<br>Ph: ${esc(s.party.phone)}`:""}</td><td><b>${esc(s.party.name)}</b><br>${addr(s.party.ship)}<br>State code: ${esc(s.party.ship?.state||"")}</td></tr></table>`}
   <table><thead><tr><th>#</th><th>Item</th><th>HSN</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Disc%</th><th class="num">Taxable</th><th class="num">GST%</th>${inter?`<th class="num">IGST</th>`:`<th class="num">CGST</th><th class="num">SGST</th>`}<th class="num">Amount</th></tr></thead><tbody>
   ${c.lines.map((l,i)=>`<tr><td>${i+1}</td><td>${esc(l.name)}<div style="color:#666;font-size:11px">${esc(l.sku||"")}</div></td><td>${esc(l.hsn)}</td><td class="num">${qtyf(l.qty)} ${esc(l.unit||"")}</td><td class="num">${n(l.rate)}</td><td class="num">${l.disc||""}</td><td class="num">${n(l.taxable)}</td><td class="num">${l.gst}</td>${inter?`<td class="num">${n(l.igst)}</td>`:`<td class="num">${n(l.cgst)}</td><td class="num">${n(l.sgst)}</td>`}<td class="num">${n(l.total)}</td></tr>`).join("")}
@@ -960,7 +981,7 @@ function invoiceHTML(s,standalone){
   <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:10px">
    <div style="flex:1;min-width:240px"><div><b>Amount in words:</b> Rupees ${words(c.grand)} Only</div>
     <table style="margin-top:8px;width:auto"><thead><tr><th>HSN</th><th class="num">Taxable</th><th class="num">Rate</th>${inter?`<th class="num">IGST</th>`:`<th class="num">CGST</th><th class="num">SGST</th>`}</tr></thead><tbody>${Object.values(hsn).map(h=>`<tr><td>${esc(h.hsn)}</td><td class="num">${n(h.tx)}</td><td class="num">${h.gst}%</td>${inter?`<td class="num">${n(h.i)}</td>`:`<td class="num">${n(h.c)}</td><td class="num">${n(h.s)}</td>`}</tr>`).join("")}</tbody></table>
-    ${B.bank?`<div style="margin-top:8px"><b>Bank details:</b> ${esc(B.bank)}</div>`:""}${s.notes?`<div style="margin-top:6px">${esc(s.notes)}</div>`:""}<div style="margin-top:8px;display:inline-block;padding:4px 10px;border-radius:6px;font-weight:600;${payInfo(s).status==="paid"?"background:#DFF3E6;color:#1F7A45":"background:#FCEFD6;color:#8A5300"}">Payment: ${esc(payInfo(s).label)}</div></div>
+    ${B.bank?`<div style="margin-top:8px"><b>Bank details:</b> ${esc(B.bank)}</div>`:""}${s.notes?`<div style="margin-top:6px">${esc(s.notes)}</div>`:""}${s.docTitle?"":`<div style="margin-top:8px;display:inline-block;padding:4px 10px;border-radius:6px;font-weight:600;${payInfo(s).status==="paid"?"background:#DFF3E6;color:#1F7A45":"background:#FCEFD6;color:#8A5300"}">Payment: ${esc(payInfo(s).label)}</div>`}</div>
    <div style="min-width:220px"><table><tr><td>Taxable value</td><td class="num">${n(c.taxable)}</td></tr>${inter?`<tr><td>IGST</td><td class="num">${n(c.igst)}</td></tr>`:`<tr><td>CGST</td><td class="num">${n(c.cgst)}</td></tr><tr><td>SGST</td><td class="num">${n(c.sgst)}</td></tr>`}<tr><td>Round off</td><td class="num">${n(c.round)}</td></tr><tr><td><b>Grand total</b></td><td class="num"><b>₹ ${n(c.grand)}</b></td></tr></table>
     <div style="margin-top:36px;text-align:right">For ${esc(B.name||"")}<br><br><br>Authorised signatory</div></div>
   </div>
@@ -975,10 +996,15 @@ function viewSale(id,justSaved){
   const sent=s.waSentAt?`<span class="chip good">Sent on WhatsApp ${new Date(s.waSentAt).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})}</span>`:"";
   const pi=payInfo(s);
   const payLine=x?"":pi.status==="paid"?`<span class="paid-stamp">${ic("check")} ${esc(pi.label)}</span>`:`<span class="chip p-due" style="font-size:12px;padding:5px 10px">${pi.mode?"Payment due":"Payment not recorded"}</span> <button class="btn sm pri" id="collectPay">${ic("rupee")} Collect payment</button>`;
-  openModal(`Invoice ${s.no}`,`<div class="row" style="margin-bottom:12px;gap:10px">${justSaved?`<span class="chip good">Saved as ${esc(s.no)}</span>`:""}${typeChip(s)}${payLine}${sent}${justSaved&&!phone?`<span class="chip warn">No mobile number, so WhatsApp is off</span>`:""}</div>${invoiceHTML(s,false)}${!NATIVE&&phone?`<p class="hint" style="margin-top:8px">WhatsApp opens with the message ready. Download the PDF first and attach it in the chat. The tablet app attaches the PDF for you.</p>`:""}<div id="saleAct"></div>`,
+  if(s.irn?.qr&&!window.qrcode){loadQrLib().then(()=>viewSale(id,justSaved)).catch(()=>{});}
+  const extra=x?"":`<div class="row" style="margin-top:12px;gap:8px"><button class="btn sm" id="inv_ewb">${ic("purchases")} E-way bill${s.ewb?.no?" ✓":ewbNeeded(s)?" (needed)":""}</button>${einvOn()&&s.party?.gstin?`<button class="btn sm" id="inv_irn">${ic("qr")} E-invoice (IRN)${s.irn?.irn?" ✓":""}</button>`:""}<button class="btn sm" id="inv_cn">${ic("sales")} Return / credit note</button>${S.creditNotes.some(n=>n.srcId===s.id&&n.status!=="cancelled")?`<span class="hint">Credit notes: ${S.creditNotes.filter(n=>n.srcId===s.id&&n.status!=="cancelled").map(n=>esc(n.no)).join(", ")}</span>`:""}</div>`;
+  openModal(`Invoice ${s.no}`,`<div class="row" style="margin-bottom:12px;gap:10px">${justSaved?`<span class="chip good">Saved as ${esc(s.no)}</span>`:""}${typeChip(s)}${payLine}${sent}${justSaved&&!phone?`<span class="chip warn">No mobile number, so WhatsApp is off</span>`:""}</div>${invoiceHTML(s,false)}${!NATIVE&&phone?`<p class="hint" style="margin-top:8px">WhatsApp opens with the message ready. Download the PDF first and attach it in the chat. The tablet app attaches the PDF for you.</p>`:""}${extra}<div id="saleAct"></div>`,
    `${x?"":`<button class="btn danger" id="cancelSale" style="margin-right:auto">Cancel invoice</button>`}${waBtn}${NATIVE?`<button class="btn" id="printInv">Print</button>`:""}<button class="btn" id="dlPdf">Download PDF</button><button class="btn pri" data-close>Done</button>`,{wide:true});
   $("#dlPdf").onclick=async()=>{try{await saveFile(fileBase(s)+".pdf",await invoicePDF(s),"application/pdf")}catch(e){toast("Could not create the PDF. Check your connection and try again.")}};
   if($("#printInv"))$("#printInv").onclick=()=>printInvoice(s);
+  if($("#inv_ewb"))$("#inv_ewb").onclick=()=>{closeModal();openEwbForm(s.id)};
+  if($("#inv_irn"))$("#inv_irn").onclick=()=>{closeModal();openIrnForm(s.id)};
+  if($("#inv_cn"))$("#inv_cn").onclick=()=>{closeModal();openNoteForm("cn",s.id)};
   if($("#collectPay"))$("#collectPay").onclick=()=>{closeModal();openPayment(s.id,false)};
   if($("#waSend"))$("#waSend").onclick=()=>sendWhatsApp(s);
   if($("#waNoPhone"))$("#waNoPhone").onclick=()=>toast(s.partyId?`Add a mobile number for ${s.party?.name} in Customers to send on WhatsApp`:"This bill has no mobile number, so it can't go on WhatsApp");
@@ -1004,6 +1030,12 @@ function purStatus(p){
   return d<0?`<span class="chip bad">Overdue ${-d}d</span>`:`<span class="chip ${d<=3?"warn":""}">Due ${d===0?"today":"in "+d+"d"}</span>`;
 }
 function vPurchases(){
+  const pt=sub.ptab||"bills";
+  const tabs=`<div class="tabs" role="tablist">${[["bills","Bills"],["dn",`Debit notes (${S.debitNotes.length})`]].map(([k,l])=>`<button role="tab" data-ptab="${k}" aria-selected="${pt===k}">${l}</button>`).join("")}</div>`;
+  if(pt==="dn")return `<div class="head"><div><h1>Purchases</h1><div class="sub">Debit notes for goods sent back or discounts from vendors. They reduce purchases, input GST and what you owe.</div></div></div>`+tabs+notesTable("dn");
+  return vPurchasesBills().replace('<div class="filters">',tabs+'<div class="filters">');
+}
+function vPurchasesBills(){
   const q=(sub.q||"").toLowerCase();
   const rows=S.purchases.filter(p=>!q||(p.billNo+" "+p.party?.name+" "+p.party?.gstin).toLowerCase().includes(q)).sort((a,b)=>b.date.localeCompare(a.date));
   return `<div class="head"><div><h1>Purchases</h1><div class="sub">Each purchase bill adds its quantities to stock. Track when each bill is due and paid, and deduct TDS where it applies.</div></div><button class="btn pri" data-act="newPurchase">New purchase</button></div>
@@ -1039,7 +1071,7 @@ function openPurchaseForm(editId){
    </div>
   </fieldset>
   <label class="f" style="margin-top:12px"><span>Notes (optional)</span><input class="input" id="po_notes" value="${esc(ex?.notes)}"></label><div id="purErr"></div>`,
-  `${ex?`<button class="btn danger" id="delPur" style="margin-right:auto">Delete</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="savePur">${ex?"Save changes":"Save purchase"}</button>`,{wide:true});
+  `${ex?`<button class="btn danger" id="delPur" style="margin-right:auto">Delete</button><button class="btn" id="purDN">Return / debit note</button>`:""}<button class="btn" data-close>Cancel</button><button class="btn pri" id="savePur">${ex?"Save changes":"Save purchase"}</button>`,{wide:true});
   const inter=()=>{const v=byId("vendors",st.partyId);const vs=v?.ship?.state||v?.bill?.state;return !!(home&&vs&&vs!==home)};
   const kind=()=>{$("#po_kind").innerHTML=st.partyId?(inter()?`<span class="chip warn">Inter-state purchase · IGST</span>`:`<span class="chip good">Intra-state purchase · CGST + SGST</span>`):""};
   const le=lineEditor("purchase",st.lines,inter);kind();
@@ -1074,6 +1106,7 @@ function openPurchaseForm(editId){
     else if(exTds)await guard(()=>backend.remove("tds",exTds.id));
     closeModal();toast(editId?"Purchase updated":"Purchase saved · stock added");
   };
+  if(ex&&$("#purDN"))$("#purDN").onclick=()=>{closeModal();openNoteForm("dn",ex.id)};
   if(ex)$("#delPur").onclick=()=>confirmIn("#purErr","Delete this purchase? Its quantities will be removed from stock.",async()=>{await guard(()=>backend.remove("purchases",editId));if(exTds)await guard(()=>backend.remove("tds",exTds.id));closeModal();toast("Purchase deleted")});
 }
 
@@ -1139,7 +1172,7 @@ const inRange=d=>d.date>=sub.from&&d.date<=sub.to;
 
 function vReports(){
   const tab=sub.tab||"sales";sub._exportDoc=null;
-  const tabs=[["sales","Sales register"],["purchase","Purchase register"],["gstr1","GSTR-1"],["gstr3b","GSTR-3B"],["tds","TDS · Form 140"],["msme","MSME dues"],["itemwise","Item-wise sales"],["stock","Stock summary"]];
+  const tabs=[["sales","Sales register"],["purchase","Purchase register"],["gstr1","GSTR-1"],["gstr3b","GSTR-3B"],["tds","TDS · Form 140"],["msme","MSME dues"],["outstanding","Outstanding & ageing"],["ewb","E-way bills"],["itemwise","Item-wise sales"],["stock","Stock summary"]];
   let body="";
   const T=tabs.map(([k,l])=>`<button role="tab" data-tab="${k}" aria-selected="${tab===k}">${l}</button>`).join("");
   if(tab==="sales"||tab==="purchase"){
@@ -1156,6 +1189,8 @@ function vReports(){
   else if(tab==="gstr3b") body=gstr3b();
   else if(tab==="tds") body=tdsReport();
   else if(tab==="msme") body=msmeReport();
+  else if(tab==="outstanding") body=outstandingReport();
+  else if(tab==="ewb") body=ewbRegister();
   else if(tab==="itemwise"){
     const g={};for(const s of S.sales.filter(inRange))if(s.status!=="cancelled")for(const l of docCalc(s).lines){const k=l.itemId;(g[k]=g[k]||{name:l.name,sku:l.sku,hsn:l.hsn,unit:l.unit,q:0,tx:0,tax:0,t:0});g[k].q+=l.qty;g[k].tx+=l.taxable;g[k].tax+=l.cgst+l.sgst+l.igst;g[k].t+=l.total}
     const rows=Object.values(g).sort((a,b)=>b.tx-a.tx);
@@ -1175,6 +1210,9 @@ function gstr3b(){
   const out={tx:0,i:0,c:0,s:0},nil={tx:0},pos={},itc={i:0,c:0,s:0},inw={inter:0,intra:0},unreg={tx:0};
   for(const sl of S.sales.filter(inRange)){if(sl.status==="cancelled")continue;const c=docCalc(sl),b2c=!sl.party?.gstin;
     for(const l of c.lines){if(l.gst>0){out.tx+=l.taxable;out.i+=l.igst;out.c+=l.cgst;out.s+=l.sgst;if(b2c&&sl.inter){const k=sl.pos;(pos[k]=pos[k]||{tx:0,i:0});pos[k].tx+=l.taxable;pos[k].i+=l.igst}}else nil.tx+=l.taxable}}
+  for(const n of liveNotes("creditNotes").filter(inRange)){const c=noteCalc(n),b2c=!n.party?.gstin;
+    for(const l of c.lines){if(l.gst>0){out.tx-=l.taxable;out.i-=l.igst;out.c-=l.cgst;out.s-=l.sgst;if(b2c&&n.inter){const k=n.pos;(pos[k]=pos[k]||{tx:0,i:0});pos[k].tx-=l.taxable;pos[k].i-=l.igst}}else nil.tx-=l.taxable}}
+  for(const n of liveNotes("debitNotes").filter(inRange)){if(!n.party?.gstin)continue;const c=noteCalc(n);for(const l of c.lines)if(l.gst>0){itc.i-=l.igst;itc.c-=l.cgst;itc.s-=l.sgst}}
   for(const pu of S.purchases.filter(inRange)){const c=docCalc(pu);
     if(pu.party?.gstin){for(const l of c.lines){if(l.gst>0){itc.i+=l.igst;itc.c+=l.cgst;itc.s+=l.sgst}else inw[pu.inter?"inter":"intra"]+=l.taxable}}
     else unreg.tx+=c.taxable}
@@ -1286,44 +1324,38 @@ function msmeReport(){
 
 function gstr1(){
   const home=S.settings.state;const part=sub.part||"b2b";
-  const sales=S.sales.filter(inRange);const live=sales.filter(s=>s.status!=="cancelled");
-  const b2b=live.filter(s=>s.party?.gstin);
-  const B2CL_LIMIT=100000;
-  const b2cl=live.filter(s=>!s.party?.gstin&&s.inter&&docCalc(s).grand>B2CL_LIMIT);
-  const b2csSrc=live.filter(s=>!s.party?.gstin&&!b2cl.includes(s));
-  // rate-wise rows per invoice
-  const rateRows=s=>{const g={};for(const l of docCalc(s).lines){(g[l.gst]=g[l.gst]||{rate:l.gst,tx:0,c:0,sg:0,i:0});g[l.gst].tx+=l.taxable;g[l.gst].c+=l.cgst;g[l.gst].sg+=l.sgst;g[l.gst].i+=l.igst}return Object.values(g)};
-  const b2bRows=[];for(const s of b2b){const c=docCalc(s);for(const r of rateRows(s))b2bRows.push({s,val:c.grand,...r})}
-  const b2clRows=[];for(const s of b2cl){const c=docCalc(s);for(const r of rateRows(s))b2clRows.push({s,val:c.grand,...r})}
-  const cs={};for(const s of b2csSrc)for(const r of rateRows(s)){const k=s.pos+"|"+r.rate;(cs[k]=cs[k]||{pos:s.pos,rate:r.rate,tx:0,c:0,sg:0,i:0,inter:s.inter});cs[k].tx+=r.tx;cs[k].c+=r.c;cs[k].sg+=r.sg;cs[k].i+=r.i}
-  const b2csRows=Object.values(cs).sort((a,b)=>(a.pos+a.rate).localeCompare(b.pos+b.rate));
-  const hsnOf=list=>{const h={};for(const s of list)for(const l of docCalc(s).lines){const k=l.hsn+"|"+l.gst+"|"+l.unit;(h[k]=h[k]||{hsn:l.hsn,desc:l.name,unit:l.unit,rate:l.gst,q:0,tx:0,c:0,sg:0,i:0});h[k].q+=l.qty;h[k].tx+=l.taxable;h[k].c+=l.cgst;h[k].sg+=l.sgst;h[k].i+=l.igst}return Object.values(h).sort((a,b)=>a.hsn.localeCompare(b.hsn))};
-  const hsnB2B=hsnOf(b2b),hsnB2C=hsnOf(live.filter(s=>!s.party?.gstin));
-  const series={};for(const s of sales){const k=s.no.slice(0,s.no.lastIndexOf("/")+1);(series[k]=series[k]||[]).push(s)}
-  const docRows=Object.entries(series).map(([k,l])=>{l.sort((a,b)=>a.seq-b.seq);return {k,from:l[0].no,to:l[l.length-1].no,total:l.length,cancel:l.filter(x=>x.status==="cancelled").length}});
+  const d=gstr1Data(sub.from,sub.to);
+  const b2bRows=[];for(const x of d.b2b){const c=docCalc(x);for(const r of d.rateRows(c.lines))b2bRows.push({s:x,val:c.grand,...r})}
+  const b2clRows=[];for(const x of d.b2cl){const c=docCalc(x);for(const r of d.rateRows(c.lines))b2clRows.push({s:x,val:c.grand,...r})}
+  const cdnRows=[];for(const n of [...d.cnB2B,...d.cnB2CL]){const c=noteCalc(n);for(const r of d.rateRows(c.lines))cdnRows.push({n,val:c.grand,...r})}
+  const b2csRows=d.b2cs,docRows=d.docs;
   const sumT=a=>a.reduce((o,r)=>({tx:o.tx+r.tx,c:o.c+r.c,sg:o.sg+r.sg,i:o.i+r.i}),{tx:0,c:0,sg:0,i:0});
-  const parts=[["b2b",`4A · B2B (${b2b.length})`],["b2cl",`5 · B2CL (${b2cl.length})`],["b2cs",`7 · B2CS (${b2csRows.length})`],["hsn","12 · HSN summary"],["docs","13 · Documents"]];
+  const parts=[["b2b",`4A · B2B (${d.b2b.length})`],["b2cl",`5 · B2CL (${d.b2cl.length})`],["b2cs",`7 · B2CS (${b2csRows.length})`],["cdn",`9B · Credit notes (${d.cnB2B.length+d.cnB2CL.length})`],["hsn","12 · HSN summary"],["docs","13 · Documents"]];
   let tbl="",exp;
   const taxCols=r=>`<td class="num">${amt(r.tx)}</td><td class="num">${amt(r.i)}</td><td class="num">${amt(r.c)}</td><td class="num">${amt(r.sg)}</td>`;
   const taxFoot=t=>`<td class="num">${amt(t.tx)}</td><td class="num">${amt(t.i)}</td><td class="num">${amt(t.c)}</td><td class="num">${amt(t.sg)}</td>`;
   const TH=`<th class="num">Taxable</th><th class="num">IGST</th><th class="num">CGST</th><th class="num">SGST</th>`;
-  if(part==="b2b"){exp=[["GSTIN of Recipient","Receiver Name","Invoice Number","Invoice date","Invoice Value","Place Of Supply","Reverse Charge","Invoice Type","Rate","Taxable Value","IGST","CGST","SGST","Cess Amount"],...b2bRows.map(r=>[r.s.party.gstin,r.s.party.name,r.s.no,fmtDate(r.s.date),r.val,stateLabel(r.s.pos),"N","Regular B2B",r.rate,r2(r.tx),r2(r.i),r2(r.c),r2(r.sg),0])];
+  if(part==="b2b"){exp=[["GSTIN of Recipient","Receiver Name","Invoice Number","Invoice date","Invoice Value","Place Of Supply","Reverse Charge","Invoice Type","Rate","Taxable Value","IGST","CGST","SGST","Cess Amount"],...b2bRows.map(r=>[r.s.party.gstin,r.s.party.name,r.s.no,fmtDate(r.s.date),r.val,stateLabel(r.s.pos),"N","Regular B2B",r.rate,r.tx,r.i,r.c,r.sg,0])];
     tbl=b2bRows.length?`<table><thead><tr><th>GSTIN</th><th>Receiver</th><th>Invoice</th><th>Date</th><th class="num">Inv value</th><th>POS</th><th class="num">Rate</th>${TH}</tr></thead><tbody>${b2bRows.map(r=>`<tr><td class="mono">${esc(r.s.party.gstin)}</td><td>${esc(r.s.party.name)}</td><td class="mono">${esc(r.s.no)}</td><td class="mono">${fmtDate(r.s.date)}</td><td class="num">${amt(r.val)}</td><td>${esc(stateLabel(r.s.pos))}</td><td class="num">${r.rate}%</td>${taxCols(r)}</tr>`).join("")}</tbody><tfoot><tr><td colspan="7">Total</td>${taxFoot(sumT(b2bRows))}</tr></tfoot></table>`:""}
-  else if(part==="b2cl"){exp=[["Invoice Number","Invoice date","Invoice Value","Place Of Supply","Rate","Taxable Value","Cess Amount"],...b2clRows.map(r=>[r.s.no,fmtDate(r.s.date),r.val,stateLabel(r.s.pos),r.rate,r2(r.tx),0])];
+  else if(part==="b2cl"){exp=[["Invoice Number","Invoice date","Invoice Value","Place Of Supply","Rate","Taxable Value","Cess Amount"],...b2clRows.map(r=>[r.s.no,fmtDate(r.s.date),r.val,stateLabel(r.s.pos),r.rate,r.tx,0])];
     tbl=b2clRows.length?`<table><thead><tr><th>Invoice</th><th>Date</th><th class="num">Inv value</th><th>POS</th><th class="num">Rate</th>${TH}</tr></thead><tbody>${b2clRows.map(r=>`<tr><td class="mono">${esc(r.s.no)}</td><td class="mono">${fmtDate(r.s.date)}</td><td class="num">${amt(r.val)}</td><td>${esc(stateLabel(r.s.pos))}</td><td class="num">${r.rate}%</td>${taxCols(r)}</tr>`).join("")}</tbody><tfoot><tr><td colspan="5">Total</td>${taxFoot(sumT(b2clRows))}</tr></tfoot></table>`:""}
-  else if(part==="b2cs"){exp=[["Type","Place Of Supply","Rate","Taxable Value","Cess Amount","E-Commerce GSTIN"],...b2csRows.map(r=>["OE",stateLabel(r.pos),r.rate,r2(r.tx),0,""])];
+  else if(part==="b2cs"){exp=[["Type","Place Of Supply","Rate","Taxable Value","Cess Amount","E-Commerce GSTIN"],...b2csRows.map(r=>["OE",stateLabel(r.pos),r.rate,r.tx,0,""])];
     tbl=b2csRows.length?`<table><thead><tr><th>Type</th><th>Place of supply</th><th>Supply</th><th class="num">Rate</th>${TH}</tr></thead><tbody>${b2csRows.map(r=>`<tr><td>OE</td><td>${esc(stateLabel(r.pos))}</td><td>${r.inter?"Inter-state":"Intra-state"}</td><td class="num">${r.rate}%</td>${taxCols(r)}</tr>`).join("")}</tbody><tfoot><tr><td colspan="4">Total</td>${taxFoot(sumT(b2csRows))}</tr></tfoot></table>`:""}
-  else if(part==="hsn"){const which=sub.hsnTab||"b2b",rows=which==="b2b"?hsnB2B:hsnB2C;
-    exp=[["HSN","Description","UQC","Total Quantity","Total Value","Rate","Taxable Value","Integrated Tax Amount","Central Tax Amount","State/UT Tax Amount","Cess Amount"],...rows.map(r=>[r.hsn,r.desc,r.unit,r.q,r2(r.tx+r.c+r.sg+r.i),r.rate,r2(r.tx),r2(r.i),r2(r.c),r2(r.sg),0])];
+  else if(part==="cdn"){exp=[["GSTIN/UIN of Recipient","Receiver Name","Note Number","Note Date","Note Type","Place Of Supply","Reverse Charge","Note Supply Type","Note Value","Rate","Taxable Value","Cess Amount"],...cdnRows.map(r=>[r.n.party?.gstin||"B2CL",r.n.party?.name,r.n.no,fmtDate(r.n.date),"C",stateLabel(r.n.pos),"N","Regular B2B",r.val,r.rate,r.tx,0])];
+    tbl=cdnRows.length?`<table><thead><tr><th>GSTIN</th><th>Receiver</th><th>Note</th><th>Date</th><th>Against</th><th class="num">Note value</th><th class="num">Rate</th>${TH}</tr></thead><tbody>${cdnRows.map(r=>`<tr><td class="mono">${esc(r.n.party?.gstin||"B2CL")}</td><td>${esc(r.n.party?.name)}</td><td class="mono">${esc(r.n.no)}</td><td class="mono">${fmtDate(r.n.date)}</td><td class="mono">${esc(r.n.srcNo)}</td><td class="num">${amt(r.val)}</td><td class="num">${r.rate}%</td>${taxCols(r)}</tr>`).join("")}</tbody><tfoot><tr><td colspan="7">Total</td>${taxFoot(sumT(cdnRows))}</tr></tfoot></table>`:"";
+    if(d.cnB2CS.length)tbl+=`<p class="hint" style="padding:10px">${d.cnB2CS.length} credit note(s) to walk-in customers are netted off in 7 · B2CS, as the portal expects.</p>`}
+  else if(part==="hsn"){const which=sub.hsnTab||"b2b",rows=which==="b2b"?d.hsnB2B:d.hsnB2C;
+    exp=[["HSN","Description","UQC","Total Quantity","Total Value","Rate","Taxable Value","Integrated Tax Amount","Central Tax Amount","State/UT Tax Amount","Cess Amount"],...rows.map(r=>[r.hsn,r.desc,r.unit,r.q,r2(r.tx+r.c+r.sg+r.i),r.rate,r.tx,r.i,r.c,r.sg,0])];
     tbl=`<div class="row" style="padding:10px"><button class="btn sm${which==="b2b"?" pri":""}" data-hsntab="b2b">B2B (to registered)</button><button class="btn sm${which==="b2c"?" pri":""}" data-hsntab="b2c">B2C (to unregistered)</button></div>`+(rows.length?`<table><thead><tr><th>HSN</th><th>Description</th><th>UQC</th><th class="num">Qty</th><th class="num">Total value</th><th class="num">Rate</th>${TH}</tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r.hsn)}</td><td>${esc(r.desc)}</td><td>${esc(r.unit)}</td><td class="num">${qtyf(r.q)}</td><td class="num">${amt(r.tx+r.c+r.sg+r.i)}</td><td class="num">${r.rate}%</td>${taxCols(r)}</tr>`).join("")}</tbody><tfoot><tr><td colspan="6">Total</td>${taxFoot(sumT(rows))}</tr></tfoot></table>`:`<div class="empty"><b>No ${which.toUpperCase()} supplies in this period</b></div>`);}
-  else {exp=[["Nature of Document","Sr. No. From","Sr. No. To","Total Number","Cancelled"],...docRows.map(r=>["Invoices for outward supply",r.from,r.to,r.total,r.cancel])];
-    tbl=docRows.length?`<table><thead><tr><th>Nature of document</th><th>From</th><th>To</th><th class="num">Total</th><th class="num">Cancelled</th><th class="num">Net issued</th></tr></thead><tbody>${docRows.map(r=>`<tr><td>Invoices for outward supply</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td><td class="num">${r.total}</td><td class="num">${r.cancel}</td><td class="num">${r.total-r.cancel}</td></tr>`).join("")}</tbody></table>`:""}
+  else {exp=[["Nature of Document","Sr. No. From","Sr. No. To","Total Number","Cancelled"],...docRows.map(r=>[r.nature,r.from,r.to,r.total,r.cancel])];
+    tbl=docRows.length?`<table><thead><tr><th>Nature of document</th><th>From</th><th>To</th><th class="num">Total</th><th class="num">Cancelled</th><th class="num">Net issued</th></tr></thead><tbody>${docRows.map(r=>`<tr><td>${esc(r.nature)}</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td><td class="num">${r.total}</td><td class="num">${r.cancel}</td><td class="num">${r.total-r.cancel}</td></tr>`).join("")}</tbody></table>`:""}
   sub._export=()=>exp;sub._file=`GSTR1_${part}_${sub.from}_to_${sub.to}.csv`;
-  const all=sumT([...b2bRows,...b2clRows,...b2csRows]);
+  const all=sumT([...b2bRows,...b2clRows,...b2csRows]),cn=sumT(cdnRows);
   return rangeFilters()+(home?"":`<div class="banner">Set your business state in Settings; it decides intra- vs inter-state supplies.</div>`)+
-  `<div class="tiles"><div class="tile"><div class="k">Taxable outward supplies</div><div class="v">${money(all.tx)}</div></div><div class="tile"><div class="k">IGST</div><div class="v">${money(all.i)}</div></div><div class="tile"><div class="k">CGST</div><div class="v">${money(all.c)}</div></div><div class="tile"><div class="k">SGST / UTGST</div><div class="v">${money(all.sg)}</div></div></div>
+  `<div class="tiles"><div class="tile"><div class="k">Taxable outward supplies</div><div class="v">${money(all.tx-cn.tx)}</div><div class="n">${cn.tx?`after ${money(cn.tx)} of credit notes`:""}</div></div><div class="tile"><div class="k">IGST</div><div class="v">${money(all.i-cn.i)}</div></div><div class="tile"><div class="k">CGST</div><div class="v">${money(all.c-cn.c)}</div></div><div class="tile"><div class="k">SGST / UTGST</div><div class="v">${money(all.sg-cn.sg)}</div></div></div>
+  <div class="row" style="margin-bottom:12px;gap:10px"><button class="btn pri" data-act="gstr1json" data-f="${sub.from}" data-t="${sub.to}">${ic("sales")} Download GSTR-1 JSON for the portal</button><span class="hint">GST portal → Returns Dashboard → GSTR-1 → Prepare Offline → Upload</span></div>
   <div class="tabs" role="tablist">${parts.map(([k,l])=>`<button role="tab" data-part="${k}" aria-selected="${part===k}">${l}</button>`).join("")}</div>
-  <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="hint">${{b2b:"Invoices to registered customers, one row per invoice and tax rate.",b2cl:"Inter-state invoices to unregistered buyers above ₹1,00,000.",b2cs:"Other sales to unregistered buyers, summarised by place of supply and rate.",hsn:"HSN-wise summary of outward supplies, split B2B and B2C.",docs:"Invoice number series issued in the period, with cancellations."}[part]}</span>${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div>
+  <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="hint">${{b2b:"Invoices to registered customers, one row per invoice and tax rate.",b2cl:"Inter-state invoices to unregistered buyers above ₹1,00,000.",b2cs:"Other sales to unregistered buyers, summarised by place of supply and rate, net of credit notes.",cdn:"Credit notes issued to registered customers (and large inter-state B2C invoices).",hsn:"HSN-wise summary of outward supplies net of credit notes, split B2B and B2C.",docs:"Invoice and credit note number series issued in the period, with cancellations."}[part]}</span><button class="btn sm" data-act="exportReport">CSV</button></div>
   <div class="tablewrap">${tbl||`<div class="empty"><b>No entries in this section</b>Nothing for this period.</div>`}</div>
   <p class="hint" style="margin-top:10px">Column headings follow the GST offline tool templates. Check figures with your tax adviser before filing.</p>`;
 }
@@ -1345,7 +1377,8 @@ const SYS_LEDGERS=[["sys:cash","Cash","cash"],["sys:bank","Bank Account","bank"]
   ["sys:sales","Sales Account","sales"],["sys:purchase","Purchase Account","purchase"],
   ["sys:ocgst","Output CGST","duties"],["sys:osgst","Output SGST","duties"],["sys:oigst","Output IGST","duties"],
   ["sys:icgst","Input CGST","duties"],["sys:isgst","Input SGST","duties"],["sys:iigst","Input IGST","duties"],
-  ["sys:tds","TDS Payable","duties"],["sys:round","Round Off","indexp"],["sys:b2c","Walk-in Customers (B2C)","debtors"]];
+  ["sys:tds","TDS Payable","duties"],["sys:round","Round Off","indexp"],["sys:b2c","Walk-in Customers (B2C)","debtors"],
+  ["sys:salesret","Sales Returns","sales"],["sys:purret","Purchase Returns","purchase"]];
 const EXP_PRESETS=[["Rent","indexp"],["Salaries & Wages","indexp"],["Electricity","indexp"],["Telephone & Internet","indexp"],["Shop Expenses","indexp"],
   ["Printing & Stationery","indexp"],["Bank Charges","indexp"],["Repairs & Maintenance","indexp"],["Travelling & Conveyance","indexp"],["Freight Inward","direxp"],
   ["Drawings","capital"],["Discount Received","indinc"],["Interest Received","indinc"]];
@@ -1387,6 +1420,17 @@ function buildPostings(){
   for(const e of S.tds){const a=r2(num(e.amount)),t=r2(num(e.tds));
     if(!e.purchaseId&&e.expLedger)add(e.date,"Payment","TDS",`${e.payee} · ${tdsSec(e.section).label}`,[{l:e.expLedger,dr:a},{l:"sys:tds",cr:t},{l:e.paidFrom||"sys:bank",cr:r2(a-t)}],{kind:"tds",id:e.id});
     if(e.depDate&&t>0)add(e.depDate,"Payment","TDS",`TDS deposited · ${e.payee}${e.challan?" · challan "+e.challan:""}`,[{l:"sys:tds",dr:t},{l:e.depFrom||"sys:bank",cr:t}],{kind:"tds",id:e.id})}
+  for(const n of S.creditNotes){if(n.status==="cancelled")continue;const c=noteCalc(n),party=n.partyId?"c:"+n.partyId:"sys:b2c";
+    const L=[{l:"sys:salesret",dr:c.taxable},{l:"sys:ocgst",dr:c.cgst},{l:"sys:osgst",dr:c.sgst},{l:"sys:oigst",dr:c.igst},{l:party,cr:c.grand}];
+    if(c.round>0)L.push({l:"sys:round",dr:c.round});else if(c.round<0)L.push({l:"sys:round",cr:-c.round});
+    add(n.date,"Credit Note",n.no,`${n.reason} · ${n.party?.name||""} (against ${n.srcNo})`,L,{kind:"cn",id:n.id});
+    if(n.refund&&n.refund!=="adjust")add(n.date,"Payment",n.no,`Refund to ${n.party?.name||""}`,[{l:party,dr:c.grand},{l:n.refund,cr:c.grand}],{kind:"cn",id:n.id})}
+  for(const n of S.debitNotes){if(n.status==="cancelled")continue;const c=noteCalc(n),party="v:"+n.partyId,reg=!!n.party?.gstin;
+    const L=[{l:party,dr:c.grand}];
+    if(reg)L.push({l:"sys:purret",cr:c.taxable},{l:"sys:icgst",cr:c.cgst},{l:"sys:isgst",cr:c.sgst},{l:"sys:iigst",cr:c.igst});else L.push({l:"sys:purret",cr:r2(c.taxable+c.tax)});
+    if(c.round>0)L.push({l:"sys:round",cr:c.round});else if(c.round<0)L.push({l:"sys:round",dr:-c.round});
+    add(n.date,"Debit Note",n.no,`${n.reason} · ${n.party?.name||""} (bill ${n.srcNo})`,L,{kind:"dn",id:n.id});
+    if(n.refund&&n.refund!=="adjust")add(n.date,"Receipt",n.no,`Refund from ${n.party?.name||""}`,[{l:n.refund,dr:c.grand},{l:party,cr:c.grand}],{kind:"dn",id:n.id})}
   for(const v of S.vouchers)add(v.date,v.type,v.no,v.narration||"",v.lines||[],{kind:"voucher",id:v.id});
   P.sort((a,b)=>a.date.localeCompare(b.date));
   return P;
@@ -1397,6 +1441,8 @@ function stockValueAt(date){
   for(const it of S.items){let q=num(it.openingStock),cq=q,cost=q*num(it.purchasePrice);
     for(const p of S.purchases)if(p.date<=date)for(const l of p.lines||[])if(l.itemId===it.id){const lq=num(l.qty);q+=lq;cq+=lq;cost+=lq*num(l.rate)*(1-num(l.disc)/100)}
     for(const s of S.sales)if(s.status!=="cancelled"&&s.date<=date)for(const l of s.lines||[])if(l.itemId===it.id)q-=num(l.qty);
+    for(const n of S.creditNotes)if(n.status!=="cancelled"&&n.restock&&n.date<=date)for(const l of n.lines||[])if(l.itemId===it.id)q+=num(l.qty);
+    for(const n of S.debitNotes)if(n.status!=="cancelled"&&n.restock&&n.date<=date)for(const l of n.lines||[])if(l.itemId===it.id){const lq=num(l.qty);q-=lq;cq-=lq;cost-=lq*num(l.rate)}
     const avg=cq>0?cost/cq:num(it.purchasePrice);if(q>0)v+=q*avg}
   return r2(v);
 }
@@ -1439,9 +1485,9 @@ function acctRange(){
 const expBtns=()=>`<button class="btn sm" data-act="exportXlsx">${ic("sales")} Excel</button><button class="btn sm" data-act="exportPdf">${ic("sales")} PDF</button>`;
 function vAccounts(){
   const tab=sub.atab||"ledgers";
-  const tabs=[["ledgers","Ledgers"],["vouchers","Vouchers & expenses"],["statement","Ledger statement"],["tb","Trial balance"],["pl","Profit & Loss"],["bs","Balance sheet"]];
+  const tabs=[["ledgers","Ledgers"],["vouchers","Vouchers & expenses"],["daybook","Day book"],["statement","Ledger statement"],["tb","Trial balance"],["pl","Profit & Loss"],["bs","Balance sheet"]];
   let body="";
-  try{body=({ledgers:aLedgers,vouchers:aVouchers,statement:aStatement,tb:aTB,pl:aPL,bs:aBS}[tab]||aLedgers)()}catch(e){console.error(e);body=`<div class="banner">Could not build this report: ${esc(e.message)}</div>`}
+  try{body=({ledgers:aLedgers,vouchers:aVouchers,daybook:aDayBook,statement:aStatement,tb:aTB,pl:aPL,bs:aBS}[tab]||aLedgers)()}catch(e){console.error(e);body=`<div class="banner">Could not build this report: ${esc(e.message)}</div>`}
   return `<div class="head"><div><h1>Accounts</h1><div class="sub">Every sale, purchase, payment, TDS entry and voucher posts to the ledgers automatically, so the trial balance, P&amp;L and balance sheet always agree.</div></div>
    <div class="row"><button class="btn" data-act="newLedger">${ic("plus")} Ledger</button><button class="btn pri" data-act="newVoucher" data-vt="Expense">${ic("plus")} Expense / voucher</button></div></div>
   <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-atab="${k}" aria-selected="${tab===k}">${l}</button>`).join("")}</div>${body}`;
@@ -1837,14 +1883,14 @@ function openPasswordForm(){
 }
 
 /* ---------- rights-aware UI ---------- */
-const VIEW_RIGHT={sales:"sales.view",purchases:"purchases.view",inventory:"items.view",items:"items.view",customers:"parties.view",vendors:"parties.view",reports:"reports.view",accounts:"accounts.view",audit:"audit.view",users:"users.manage"};
+const VIEW_RIGHT={sales:"sales.view",purchases:"purchases.view",inventory:"items.view",items:"items.view",customers:"parties.view",vendors:"parties.view",reports:"reports.view",gst:"reports.view",accounts:"accounts.view",audit:"audit.view",users:"users.manage"};
 const viewAllowed=v=>!VIEW_RIGHT[v]||can(VIEW_RIGHT[v])||(v==="accounts"&&can("accounts.edit"));
 const RIGHT_RULES=[
   ['[data-act="newSale"]',"sales.create"],['[data-act="newPurchase"],[data-pay-pur],#savePur,#delPur,#po_newv',"purchases.edit"],
   ['[data-act="newItem"],[data-edit-item],#saveItem,#delItem',"items.edit"],['[data-act="newCustomer"],[data-act="newVendor"],[data-edit-party],#saveParty,#so_newc',"parties.edit"],
   ['[data-act="newTds"],#td_save,#td_del',"taxes.edit"],['[data-act="newLedger"],[data-act="newVoucher"],[data-act="presetLedgers"],#lg_save,#lg_del,#vc_save,#vc_del,#upiLed,#cardLed',"accounts.edit"],
   ['[data-act="exportReport"],[data-act="exportXlsx"],[data-act="exportPdf"],[data-act="exportAllLedgers"],[data-act="exportStock"]',"export"],
-  ['#cancelSale',"sales.cancel"],['#collectPay',"sales.payment"],['#saveSettings,#qrFile,label[for="qrFile"],#qrDel',"settings.edit"],
+  ['#cancelSale',"sales.cancel"],['#inv_cn,#nt_save,#nt_cancel',"sales.edit"],['[data-act="newQuote"],#qt_conv,#qt_lost',"sales.create"],['#purDN',"purchases.edit"],['#inv_ewb,#inv_irn,#ew_save,#ir_save,[data-ewb],[data-irn]',"sales.edit"],['[data-act="gstr1json"],[data-act="gstr1jsonThis"],[data-act="ewbBulk"],[data-act="einvBulk"]',"export"],['#collectPay',"sales.payment"],['#saveSettings,#qrFile,label[for="qrFile"],#qrDel',"settings.edit"],
   ['[data-act="backup"],label[for="restoreF"],#restoreF',"backup"],['[data-act="clearSample"]',"settings.edit"],
 ];
 function applyRights(root){if(!SRV||!root)return;for(const [sel,r] of RIGHT_RULES)if(!can(r))root.querySelectorAll(sel).forEach(el=>{el.hidden=true;el.disabled=true})}
@@ -1888,7 +1934,7 @@ function openUserForm(id){
 let auditCache=null,auditVerify=null;
 const ACTION_LABEL={create:"Created",update:"Edited",delete:"Deleted",cancel:"Cancelled",login:"Signed in","login-failed":"Failed sign-in",logout:"Signed out",denied:"Blocked (no right)",import:"Imported","password-changed":"Password changed",setup:"Server set up"};
 const ACTION_CHIP={create:"good",update:"b2b",delete:"bad",cancel:"bad","login-failed":"warn",denied:"warn",login:"",logout:""};
-const COLL_LABEL={sales:"Sales invoice",purchases:"Purchase",items:"Item",customers:"Customer",vendors:"Vendor",tds:"TDS entry",ledgers:"Ledger",vouchers:"Voucher",settings:"Settings",users:"User",data:"Data"};
+const COLL_LABEL={sales:"Sales invoice",purchases:"Purchase",items:"Item",customers:"Customer",vendors:"Vendor",tds:"TDS entry",ledgers:"Ledger",vouchers:"Voucher",creditNotes:"Credit note",debitNotes:"Debit note",quotes:"Quotation",settings:"Settings",users:"User",data:"Data"};
 function vAudit(){
   const t=todayISO();sub.from=sub.from||addDays(t,-6);sub.to=sub.to||t;
   const filt=e=>(!sub.au||e.user?.username===sub.au)&&(!sub.ac||e.coll===sub.ac)&&(!sub.aa||e.action===sub.aa)&&e.ts.slice(0,10)>=sub.from&&e.ts.slice(0,10)<=sub.to&&(!sub.aq||JSON.stringify([e.label,e.changes]).toLowerCase().includes(sub.aq.toLowerCase()));
@@ -1959,6 +2005,303 @@ async function readLocalStore(){
   return out;
 }
 
+/* ================= GST COMPLIANCE & TRADE DOCUMENTS =================
+   Credit notes (sales returns), debit notes (purchase returns), quotations, e-way bills (NIC JSON),
+   e-invoices (IRP INV-01 JSON), GSTR-1 portal JSON, outstanding & ageing, GST hub. */
+
+/* ---------- GSTIN checksum (mod-36) ---------- */
+function gstinChecksumOk(g){
+  g=String(g||"").toUpperCase();if(!GSTIN_RE.test(g))return false;
+  const cs="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";let sum=0;
+  for(let i=0;i<14;i++){const v=cs.indexOf(g[i]),p=v*(i%2?2:1);sum+=Math.floor(p/36)+(p%36)}
+  return cs[(36-(sum%36))%36]===g[14];
+}
+
+/* ---------- returned quantities ---------- */
+const liveNotes=k=>(S[k]||[]).filter(n=>n.status!=="cancelled");
+function returnedQty(kind,srcId,itemId){return liveNotes(kind).filter(n=>n.srcId===srcId).reduce((a,n)=>a+n.lines.filter(l=>l.itemId===itemId).reduce((x,l)=>x+num(l.qty),0),0)}
+const noteCalc=n=>calcLines(n.lines,!!n.inter);
+
+/* ---------- credit / debit note form ---------- */
+async function nextDocNo(prefixKey,label,date){
+  const fy=fyOf(date),key=`${prefixKey}-${fy}`;
+  const coll=prefixKey==="CN"?"creditNotes":prefixKey==="DN"?"debitNotes":"quotes";
+  const floor=(S[coll]||[]).filter(x=>x.fy===fy).reduce((m,x)=>Math.max(m,num(x.seq)),0);
+  const seq=await backend.nextSeq(key,floor);
+  return {fy,seq,no:`${label}/${fy}/${String(seq).padStart(4,"0")}`};
+}
+function openNoteForm(kind,srcId){
+  const isCN=kind==="cn",src=byId(isCN?"sales":"purchases",srcId);if(!src)return;
+  if(isCN&&!(can("sales.edit")||can("sales.cancel")))return deny();if(!isCN&&!can("purchases.edit"))return deny();
+  const coll=isCN?"creditNotes":"debitNotes";
+  const rows=(src.lines||[]).map((l,i)=>{const done=returnedQty(coll,src.id,l.itemId);return {...l,i,max:r2(num(l.qty)-done),done}});
+  const reasons=isCN?["Sales return","Post-sale discount","Rate difference","Deficiency in goods","Other"]:["Purchase return","Discount received","Rate difference","Damaged goods","Other"];
+  openModal(`${isCN?"Credit note (sales return)":"Debit note (purchase return)"} · ${isCN?src.no:"Bill "+src.billNo}`,`
+   <div class="grid g4">
+    <label class="f req"><span>Note date</span><input class="input" type="date" id="nt_date" value="${todayISO()}"></label>
+    <label class="f"><span>Reason</span><select class="input" id="nt_reason">${reasons.map(r=>`<option>${r}</option>`).join("")}</select></label>
+    <label class="f"><span>${isCN?"Refund":"Settlement"}</span><select class="input" id="nt_refund">${isCN?`<option value="adjust">Adjust against customer's dues</option><option value="sys:cash">Refund in cash</option><option value="upi">Refund by UPI / bank</option>`:`<option value="adjust">Adjust in vendor balance</option><option value="sys:bank">Refund received in bank</option><option value="sys:cash">Refund received in cash</option>`}</select></label>
+    <label class="check" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="nt_restock" checked> ${isCN?"Goods come back into stock":"Goods go back to the vendor"}</label>
+   </div>
+   <div class="tablewrap" style="margin-top:12px"><table class="lines"><thead><tr><th>Item</th><th class="num">${isCN?"Sold":"Bought"}</th><th class="num">Already returned</th><th class="num">Return qty</th><th class="num">Rate</th><th class="num">GST %</th><th class="num">Amount</th></tr></thead><tbody>${rows.map(r=>`<tr data-i="${r.i}"><td>${esc(r.name)}<div class="hint mono">${esc(r.sku||"")} · HSN ${esc(r.hsn||"")}</div></td><td class="num">${qtyf(num(r.qty))}</td><td class="num">${qtyf(r.done)}</td><td><input class="input mono" type="number" step="any" min="0" max="${r.max}" data-k="q" style="width:90px;text-align:right" placeholder="0"${r.max<=0?" disabled":""}></td><td><input class="input mono" type="number" step="0.01" min="0" data-k="r" style="width:100px;text-align:right" value="${num(r.rate)*(1-num(r.disc)/100)}"></td><td class="num">${r.gst}</td><td class="num" data-amt>0.00</td></tr>`).join("")}</tbody></table></div>
+   <div class="sum" id="nt_sum"></div>
+   <label class="f" style="margin-top:12px"><span>Notes (optional)</span><input class="input" id="nt_notes"></label><div id="nt_err"></div>`,
+   `<button class="btn" data-close>Cancel</button><button class="btn pri" id="nt_save">Save ${isCN?"credit":"debit"} note</button>`,{wide:true});
+  const lines=()=>[...$("#ov").querySelectorAll("tbody tr")].map(tr=>{const r=rows[+tr.dataset.i],q=num(tr.querySelector("[data-k=q]").value),rate=num(tr.querySelector("[data-k=r]").value);return {itemId:r.itemId,name:r.name,sku:r.sku,hsn:r.hsn,unit:r.unit,qty:q,rate,disc:0,gst:num(r.gst),max:r.max}}).filter(l=>l.qty>0);
+  const upd=()=>{const ls=lines(),c=calcLines(ls,!!src.inter);$("#ov").querySelectorAll("tbody tr").forEach(tr=>{const r=rows[+tr.dataset.i],q=num(tr.querySelector("[data-k=q]").value),rate=num(tr.querySelector("[data-k=r]").value);tr.querySelector("[data-amt]").textContent=amt(r2(q*rate*(1+num(r.gst)/100)))});
+    $("#nt_sum").innerHTML=`<div>Taxable value</div><div>${amt(c.taxable)}</div><div>GST</div><div>${amt(c.tax)}</div><div class="gt">${isCN?"Credit":"Debit"} note total</div><div class="gt">${money(c.grand)}</div>`};
+  $("#ov").addEventListener("input",upd);upd();
+  $("#nt_reason").onchange=e=>{const goods=/return|Damaged|Deficiency/i.test(e.target.value);$("#nt_restock").checked=goods};
+  $("#nt_save").onclick=async()=>{
+    const ls=lines(),err=m=>$("#nt_err").innerHTML=`<div class="err">${m}</div>`,date=$("#nt_date").value;
+    if(!date)return err("Choose the note date.");if(date<src.date)return err(`The note can't be dated before the ${isCN?"invoice":"bill"} (${fmtDate(src.date)}).`);
+    if(!ls.length)return err("Enter the quantity being returned or credited for at least one item.");
+    const over=ls.find(l=>l.qty>l.max+1e-9);if(over)return err(`${esc(over.name)}: you can return at most ${qtyf(over.max)}.`);
+    $("#nt_save").disabled=true;
+    try{
+      const {fy,seq,no}=await nextDocNo(isCN?"CN":"DN",isCN?"CN":"DN",date);
+      const ref=$("#nt_refund").value;
+      const o={id:uid(),no,fy,seq,date,srcId:src.id,srcNo:isCN?src.no:src.billNo,srcDate:src.date,partyId:src.partyId||null,party:src.party,pos:src.pos||src.party?.bill?.state,inter:!!src.inter,type:isCN?saleType(src):(src.party?.gstin?"b2b":"b2c"),
+        lines:ls.map(({max,...l})=>l),reason:$("#nt_reason").value,restock:$("#nt_restock").checked,refund:ref==="upi"?(S.settings.upiLedger||"sys:bank"):ref,notes:$("#nt_notes").value.trim(),status:"active",created:new Date().toISOString()};
+      o.grand=noteCalc(o).grand;
+      await guard(()=>backend.put(isCN?"creditNotes":"debitNotes",o));closeModal();toast(`${isCN?"Credit":"Debit"} note ${no} saved`);viewNote(isCN?"cn":"dn",o.id);
+    }catch(e){$("#nt_save").disabled=false}
+  };
+}
+function noteAsDoc(kind,n){return {...n,docTitle:kind==="cn"?"CREDIT NOTE":"DEBIT NOTE",lines:n.lines,status:n.status,payMode:null,noteRef:`Against ${kind==="cn"?"invoice":"bill"} ${n.srcNo} dated ${fmtDate(n.srcDate)} · Reason: ${n.reason}`}}
+function viewNote(kind,id){
+  const n=byId(kind==="cn"?"creditNotes":"debitNotes",id);if(!n)return;
+  const d=noteAsDoc(kind,n),x=n.status==="cancelled";
+  openModal(`${kind==="cn"?"Credit":"Debit"} note ${n.no}`,`<div class="row" style="margin-bottom:10px"><span class="chip ${kind==="cn"?"warn":"b2b"}">${esc(n.reason)}</span>${n.restock?'<span class="chip good">Stock adjusted</span>':""}${x?'<span class="chip bad">Cancelled</span>':""}</div>${invoiceHTML(d,false)}<div id="ntAct"></div>`,
+   `${x?"":`<button class="btn danger" id="nt_cancel" style="margin-right:auto">Cancel note</button>`}${kind==="cn"&&waNumber(n.party?.phone)?`<button class="btn wa" id="nt_wa">Send on WhatsApp</button>`:""}${NATIVE?`<button class="btn" id="nt_print">Print</button>`:""}<button class="btn" id="nt_pdf">Download PDF</button><button class="btn pri" data-close>Done</button>`,{wide:true});
+  $("#nt_pdf").onclick=async()=>{try{await saveFile(fileBase(n)+".pdf",await invoicePDF(d),"application/pdf")}catch(e){toast("Could not create the PDF")}};
+  if($("#nt_print"))$("#nt_print").onclick=()=>NATIVE.printHtml(`<!doctype html><html><head><meta charset="utf-8"></head><body>${invoiceHTML(d,true)}</body></html>`,n.no);
+  if($("#nt_wa"))$("#nt_wa").onclick=()=>sendWhatsApp({...d,no:n.no});
+  if($("#nt_cancel"))$("#nt_cancel").onclick=()=>confirmIn("#ntAct",`Cancel ${n.no}? Stock, GST and accounts go back as before; the number stays used.`,async()=>{await guard(()=>backend.put(kind==="cn"?"creditNotes":"debitNotes",{...n,status:"cancelled"}));closeModal();toast(`${n.no} cancelled`)});
+}
+function notesTable(kind){
+  const coll=kind==="cn"?"creditNotes":"debitNotes",rows=[...S[coll]].sort((a,b)=>b.date.localeCompare(a.date)||String(b.no).localeCompare(String(a.no)));
+  return `<div class="tablewrap">${rows.length?`<table><thead><tr><th>Note no</th><th>Date</th><th>${kind==="cn"?"Customer":"Vendor"}</th><th>Against</th><th>Reason</th><th class="num">Taxable</th><th class="num">GST</th><th class="num">Total</th><th></th></tr></thead><tbody>${rows.map(n=>{const c=noteCalc(n),x=n.status==="cancelled";return `<tr><td class="mono"><button class="link" data-note="${kind}:${n.id}">${esc(n.no)}</button>${x?' <span class="chip bad">Cancelled</span>':""}</td><td class="mono">${fmtDate(n.date)}</td><td>${esc(n.party?.name)}<div class="hint mono">${esc(n.party?.gstin||"Unregistered")}</div></td><td class="mono">${esc(n.srcNo)}<div class="hint">${fmtDate(n.srcDate)}</div></td><td>${esc(n.reason)}</td><td class="num">${amt(x?0:c.taxable)}</td><td class="num">${amt(x?0:c.tax)}</td><td class="num"><b>${amt(x?0:c.grand)}</b></td><td><button class="btn sm" data-note="${kind}:${n.id}">Open</button></td></tr>`}).join("")}</tbody></table>`:`<div class="empty"><b>No ${kind==="cn"?"credit":"debit"} notes yet</b>${kind==="cn"?"Open a sales invoice and choose “Return / credit note” when a customer returns goods or you give a discount after billing.":"Open a purchase bill and choose “Return / debit note” when you send goods back to a vendor."}</div>`}</div>`;
+}
+
+/* ---------- quotations ---------- */
+function quotesTable(){
+  const t=todayISO(),rows=[...S.quotes].sort((a,b)=>b.date.localeCompare(a.date)||String(b.no).localeCompare(String(a.no)));
+  const st=q=>q.status==="converted"?'<span class="chip good">Converted</span>':q.status==="lost"?'<span class="chip bad">Lost</span>':q.validTill&&q.validTill<t?'<span class="chip warn">Expired</span>':'<span class="chip b2b">Open</span>';
+  return `<div class="row" style="margin-bottom:10px"><button class="btn pri" data-act="newQuote">${ic("plus")} New quotation</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>Quotation</th><th>Date</th><th>Customer</th><th>Valid till</th><th>Status</th><th class="num">Amount</th><th></th></tr></thead><tbody>${rows.map(q=>`<tr><td class="mono"><button class="link" data-quote="${q.id}">${esc(q.no)}</button></td><td class="mono">${fmtDate(q.date)}</td><td>${esc(q.party?.name)} ${typeChip(q)}</td><td class="mono">${fmtDate(q.validTill||"")}</td><td>${st(q)}${q.convertedTo?`<div class="hint mono">${esc(q.convertedTo)}</div>`:""}</td><td class="num"><b>${amt(docCalc(q).grand)}</b></td><td><button class="btn sm" data-quote="${q.id}">Open</button></td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No quotations yet</b>Send an estimate first; convert it into an invoice in one tap when the customer confirms.</div>`}</div>`;
+}
+function viewQuote(id){
+  const q=byId("quotes",id);if(!q)return;const d={...q,docTitle:"QUOTATION",noteRef:q.validTill?`Valid till ${fmtDate(q.validTill)}`:""};
+  openModal(`Quotation ${q.no}`,`${invoiceHTML(d,false)}<div id="qtAct"></div>`,
+   `${q.status==="open"||!q.status?`<button class="btn danger" id="qt_lost" style="margin-right:auto">Mark as lost</button>`:""}${waNumber(q.party?.phone)?`<button class="btn wa" id="qt_wa">Send on WhatsApp</button>`:""}<button class="btn" id="qt_pdf">Download PDF</button>${q.status!=="converted"?`<button class="btn pri" id="qt_conv">${ic("check")} Convert to invoice</button>`:`<button class="btn pri" data-close>Done</button>`}`,{wide:true});
+  $("#qt_pdf").onclick=async()=>{try{await saveFile(fileBase(q)+".pdf",await invoicePDF(d),"application/pdf")}catch(e){toast("Could not create the PDF")}};
+  if($("#qt_wa"))$("#qt_wa").onclick=()=>sendWhatsApp(d);
+  if($("#qt_lost"))$("#qt_lost").onclick=async()=>{await guard(()=>backend.put("quotes",{...q,status:"lost"}));closeModal();toast("Marked as lost")};
+  if($("#qt_conv"))$("#qt_conv").onclick=()=>{closeModal();openSaleForm({fromQuote:q.id,mode:saleType(q)==="b2b"&&q.partyId?"b2b":"b2c",partyId:q.partyId||"",lines:JSON.parse(JSON.stringify(q.lines)),b2c:q.partyId?null:{phone:q.party?.phone,name:q.party?.name,addr:q.party?.bill?.line}})};
+}
+
+/* ---------- E-way bill (NIC bulk JSON) ---------- */
+const EWB_LIMIT=50000;
+const ewbNeeded=s=>s.status!=="cancelled"&&docCalc(s).grand>EWB_LIMIT;
+const pinOf=a=>{const p=String(a?.pin||"").replace(/\D/g,"");return p.length===6?+p:0};
+const dmy=iso=>{if(!iso)return"";const [y,m,d]=iso.split("-");return `${d}/${m}/${y}`};
+function ewbBill(s){
+  const B=S.settings,c=docCalc(s),e=s.ewbInfo||{},p=s.party||{},ship=p.ship||p.bill||{},bill=p.bill||{};
+  const sameShip=JSON.stringify([bill.line,bill.pin])===JSON.stringify([ship.line,ship.pin]);
+  const byHsn={};for(const l of c.lines){const k=l.hsn+"|"+l.gst;(byHsn[k]=byHsn[k]||{name:l.name,desc:l.name,hsn:l.hsn,q:0,unit:l.unit||"NOS",tx:0,g:l.gst});byHsn[k].q+=l.qty;byHsn[k].tx+=l.taxable}
+  const items=Object.values(byHsn),main=[...items].sort((a,b)=>b.tx-a.tx)[0];
+  return {userGstin:B.gstin||"",supplyType:"O",subSupplyType:1,subSupplyDesc:"",docType:"INV",docNo:s.no,docDate:dmy(s.date),
+    fromGstin:B.gstin||"",fromTrdName:B.name||"",fromAddr1:(B.address||"").slice(0,120),fromAddr2:"",fromPlace:(B.city||"").slice(0,50),fromPincode:+(String(e.fromPin||B.pin||"").replace(/\D/g,""))||0,actFromStateCode:+B.state||0,fromStateCode:+B.state||0,
+    toGstin:p.gstin||"URP",toTrdName:p.name||"",toAddr1:(ship.line||bill.line||"").slice(0,120),toAddr2:"",toPlace:(ship.city||bill.city||"").slice(0,50),toPincode:+(String(e.toPin||ship.pin||bill.pin||"").replace(/\D/g,""))||0,actToStateCode:+(ship.state||s.pos)||0,toStateCode:+(s.pos||bill.state)||0,
+    transactionType:sameShip?1:2,otherValue:r2(c.round),totalValue:c.taxable,cgstValue:c.cgst,sgstValue:c.sgst,igstValue:c.igst,cessValue:0,cessNonAdvolValue:0,totInvValue:c.grand,
+    transporterId:e.transId||"",transporterName:e.transName||"",transDocNo:e.transDocNo||"",transMode:String(e.mode||"1"),transDistance:String(e.km||"0"),transDocDate:dmy(e.transDocDate||""),vehicleNo:(e.vehicle||"").replace(/\s|-/g,"").toUpperCase(),vehicleType:"R",mainHsnCode:+main?.hsn||0,
+    itemList:items.map((it,i)=>({itemNo:i+1,productName:it.name.slice(0,100),productDesc:it.desc.slice(0,100),hsnCode:+it.hsn||0,quantity:r2(it.q),qtyUnit:String(it.unit).slice(0,3).toUpperCase(),taxableAmount:r2(it.tx),sgstRate:s.inter?0:it.g/2,cgstRate:s.inter?0:it.g/2,igstRate:s.inter?it.g:0,cessRate:0,cessNonadvol:0}))};
+}
+function ewbProblems(s){
+  const B=S.settings,b=ewbBill(s),out=[];
+  if(!B.gstin)out.push("Your GSTIN (Settings)");if(!b.fromPincode)out.push("Your shop's PIN code (Settings)");if(!b.toPincode)out.push("Customer's PIN code");
+  if(b.itemList.some(i=>!i.hsnCode))out.push("HSN codes for all items");
+  if(b.transMode==="1"&&!b.vehicleNo&&!b.transporterId)out.push("Vehicle number, or transporter ID for Part A only");
+  return out;
+}
+async function downloadEwbJson(list){
+  const bad=list.map(s=>[s,ewbProblems(s)]).filter(([,p])=>p.length);
+  if(bad.length){toast(`${bad[0][0].no}: add ${bad[0][1].join(", ")}`);return false}
+  const json={version:"1.0.0621",billLists:list.map(ewbBill)};
+  await saveFile(`EWB_${list.length===1?fileBase(list[0]):todayISO()+"_"+list.length+"_bills"}.json`,new Blob([JSON.stringify(json,null,1)],{type:"application/json"}),"application/json");
+  return true;
+}
+function openEwbForm(id){
+  const s=byId("sales",id);if(!s)return;const e=s.ewbInfo||{},B=S.settings,c=docCalc(s);
+  openModal(`E-way bill · ${s.no}`,`<div class="row" style="margin-bottom:10px">${ewbNeeded(s)?`<span class="chip warn">Needed: consignment value ${money(c.grand)} is above ₹50,000</span>`:`<span class="chip">Optional: value ${money(c.grand)} (some states need it for intra-state moves)</span>`}${s.ewb?.no?`<span class="paid-stamp">${ic("check")} EWB ${esc(s.ewb.no)}</span>`:""}</div>
+   <fieldset><legend>Part B · Transport</legend><div class="grid g3">
+    <label class="f"><span>Mode</span><select class="input" id="ew_mode">${[["1","Road"],["2","Rail"],["3","Air"],["4","Ship"]].map(([k,l])=>`<option value="${k}"${String(e.mode||"1")===k?" selected":""}>${l}</option>`).join("")}</select></label>
+    <label class="f"><span>Vehicle number</span><input class="input mono" id="ew_veh" value="${esc(e.vehicle||"")}" placeholder="MH12AB1234" style="text-transform:uppercase"></label>
+    <label class="f"><span>Distance (km)</span><input class="input mono" id="ew_km" type="number" min="0" max="4000" value="${esc(e.km??"")}" placeholder="0 = auto from PIN codes"></label>
+    <label class="f"><span>Transporter name</span><input class="input" id="ew_tn" value="${esc(e.transName||"")}"></label>
+    <label class="f"><span>Transporter ID (GSTIN / TRANSIN)</span><input class="input mono" id="ew_tid" maxlength="15" value="${esc(e.transId||"")}" style="text-transform:uppercase"></label>
+    <label class="f"><span>LR / RR / transport doc no.</span><input class="input mono" id="ew_tdn" value="${esc(e.transDocNo||"")}"></label>
+    <label class="f"><span>Transport doc date</span><input class="input" type="date" id="ew_tdd" value="${e.transDocDate||""}"></label>
+    <label class="f"><span>Dispatch PIN (yours)</span><input class="input mono" id="ew_fp" maxlength="6" value="${esc(e.fromPin||B.pin||"")}"></label>
+    <label class="f"><span>Delivery PIN (customer)</span><input class="input mono" id="ew_tp" maxlength="6" value="${esc(e.toPin||s.party?.ship?.pin||s.party?.bill?.pin||"")}"></label>
+   </div></fieldset>
+   <ol class="hint" style="margin:12px 0 0 18px;line-height:1.7"><li>Download the JSON file below.</li><li>On <a href="https://ewaybillgst.gov.in/" target="_blank" rel="noopener">ewaybillgst.gov.in</a>, sign in and go to <b>E-waybill → Generate Bulk</b>, choose the file and upload.</li><li>Copy the 12-digit e-way bill number here. It prints on the invoice.</li></ol>
+   <fieldset style="margin-top:12px"><legend>After generating on the portal</legend><div class="grid g3">
+    <label class="f"><span>E-way bill number</span><input class="input mono" id="ew_no" inputmode="numeric" maxlength="14" value="${esc(s.ewb?.no||"")}" placeholder="12 digits"></label>
+    <label class="f"><span>Generated on</span><input class="input" type="date" id="ew_dt" value="${s.ewb?.date||""}"></label>
+    <label class="f"><span>Valid until</span><input class="input" type="date" id="ew_vu" value="${s.ewb?.validUntil||""}"></label>
+   </div></fieldset><div id="ew_err"></div>`,
+   `<button class="btn" data-close>Close</button><button class="btn" id="ew_json">${ic("sales")} Download e-way bill JSON</button><button class="btn pri" id="ew_save">Save</button>`,{wide:true});
+  const read=()=>({mode:$("#ew_mode").value,vehicle:$("#ew_veh").value.trim().toUpperCase(),km:$("#ew_km").value,transName:$("#ew_tn").value.trim(),transId:$("#ew_tid").value.trim().toUpperCase(),transDocNo:$("#ew_tdn").value.trim(),transDocDate:$("#ew_tdd").value,fromPin:$("#ew_fp").value.trim(),toPin:$("#ew_tp").value.trim()});
+  const persist=async()=>{const no=$("#ew_no").value.replace(/\s/g,"");if(no&&!/^\d{12}$/.test(no)){$("#ew_err").innerHTML=`<div class="err">The e-way bill number has 12 digits.</div>`;throw 0}
+    const upd={...byId("sales",id),ewbInfo:read(),ewb:no?{no,date:$("#ew_dt").value||todayISO(),validUntil:$("#ew_vu").value}:null};await guard(()=>backend.put("sales",upd));return upd};
+  $("#ew_json").onclick=async()=>{try{const upd=await persist();const p=ewbProblems(upd);if(p.length){$("#ew_err").innerHTML=`<div class="err">Before the file can be made, add: ${p.map(esc).join(", ")}.</div>`;return}await downloadEwbJson([upd])}catch(e){}};
+  $("#ew_save").onclick=async()=>{try{await persist();closeModal();toast("E-way bill details saved");viewSale(id)}catch(e){}};
+}
+
+/* ---------- E-invoice (IRP, schema INV-01 v1.1) ---------- */
+const einvOn=()=>!!S.settings.einvoice;
+function einvJson(s){
+  const B=S.settings,c=docCalc(s),p=s.party||{},bill=p.bill||{},ship=p.ship||bill;
+  const json={Version:"1.1",TranDtls:{TaxSch:"GST",SupTyp:"B2B",RegRev:"N",IgstOnIntra:"N"},DocDtls:{Typ:"INV",No:s.no,Dt:dmy(s.date)},
+    SellerDtls:{Gstin:B.gstin||"",LglNm:B.name||"",Addr1:(B.address||"").slice(0,100)||"NA",Loc:(B.city||"").slice(0,50)||"NA",Pin:+(String(B.pin||"").replace(/\D/g,""))||0,Stcd:String(B.state||""),...(B.phone?{Ph:String(B.phone).replace(/\D/g,"").slice(-12)}:{}),...(B.email?{Em:B.email}:{})},
+    BuyerDtls:{Gstin:p.gstin||"",LglNm:p.name||"",Pos:String(s.pos||""),Addr1:(bill.line||"").slice(0,100)||"NA",Loc:(bill.city||"").slice(0,50)||"NA",Pin:+(String(bill.pin||"").replace(/\D/g,""))||0,Stcd:String(bill.state||"")},
+    ItemList:c.lines.map((l,i)=>{const gross=r2(l.qty*l.rate),disc=r2(gross-l.taxable);return {SlNo:String(i+1),PrdDesc:l.name.slice(0,300),IsServc:"N",HsnCd:String(l.hsn||""),Qty:l.qty,Unit:String(l.unit||"NOS").slice(0,8).toUpperCase(),UnitPrice:r2(l.rate),TotAmt:gross,Discount:disc,AssAmt:l.taxable,GstRt:l.gst,IgstAmt:l.igst,CgstAmt:l.cgst,SgstAmt:l.sgst,CesRt:0,CesAmt:0,CesNonAdvlAmt:0,StateCesRt:0,StateCesAmt:0,StateCesNonAdvlAmt:0,OthChrg:0,TotItemVal:l.total}}),
+    ValDtls:{AssVal:c.taxable,CgstVal:c.cgst,SgstVal:c.sgst,IgstVal:c.igst,CesVal:0,StCesVal:0,Discount:0,OthChrg:0,RndOffAmt:c.round,TotInvVal:c.grand}};
+  if(JSON.stringify([bill.line,bill.pin])!==JSON.stringify([ship.line,ship.pin])&&ship.line)json.ShipDtls={LglNm:p.name||"",Addr1:ship.line.slice(0,100),Loc:(ship.city||"").slice(0,50)||"NA",Pin:+(String(ship.pin||"").replace(/\D/g,""))||0,Stcd:String(ship.state||"")};
+  return json;
+}
+function einvProblems(s){const B=S.settings,out=[];if(!B.gstin)out.push("your GSTIN");if(!String(B.pin||"").match(/^\d{6}$/))out.push("your PIN code (Settings)");if(!s.party?.gstin)out.push("customer GSTIN (e-invoices are for B2B)");if(!String(s.party?.bill?.pin||"").match(/^\d{6}$/))out.push("customer PIN code");if(docCalc(s).lines.some(l=>!l.hsn))out.push("HSN codes");return out}
+function openIrnForm(id){
+  const s=byId("sales",id);if(!s)return;const r=s.irn||{};
+  openModal(`E-invoice (IRN) · ${s.no}`,`<ol class="hint" style="margin:0 0 12px 18px;line-height:1.7"><li>Download the e-invoice JSON.</li><li>Upload it on the IRP (<a href="https://einvoice1.gst.gov.in/" target="_blank" rel="noopener">einvoice1.gst.gov.in</a>) using the bulk generation tool, or through your GSP.</li><li>Paste the IRN, acknowledgement and signed QR code here. They print on the invoice.</li></ol>
+   <div class="grid g3"><label class="f span2"><span>IRN (64 characters)</span><input class="input mono" id="ir_irn" maxlength="64" value="${esc(r.irn||"")}"></label><label class="f"><span>Ack no.</span><input class="input mono" id="ir_ack" value="${esc(r.ackNo||"")}"></label>
+   <label class="f"><span>Ack date</span><input class="input" type="date" id="ir_ackdt" value="${r.ackDate||""}"></label><label class="f span2"><span>Signed QR code (text from IRP)</span><textarea class="input mono" id="ir_qr" rows="3">${esc(r.qr||"")}</textarea></label></div><div id="ir_err"></div>`,
+   `<button class="btn" data-close>Close</button><button class="btn" id="ir_json">${ic("sales")} Download e-invoice JSON</button><button class="btn pri" id="ir_save">Save</button>`,{wide:true});
+  $("#ir_json").onclick=async()=>{const p=einvProblems(s);if(p.length){$("#ir_err").innerHTML=`<div class="err">Add ${p.map(esc).join(", ")} first.</div>`;return}await saveFile(`EINV_${fileBase(s)}.json`,new Blob([JSON.stringify([einvJson(s)],null,1)],{type:"application/json"}),"application/json")};
+  $("#ir_save").onclick=async()=>{const irn=$("#ir_irn").value.trim();if(irn&&irn.length!==64){$("#ir_err").innerHTML=`<div class="err">The IRN has 64 characters.</div>`;return}
+    await guard(()=>backend.put("sales",{...byId("sales",id),irn:irn?{irn,ackNo:$("#ir_ack").value.trim(),ackDate:$("#ir_ackdt").value,qr:$("#ir_qr").value.trim()}:null}));closeModal();toast("E-invoice details saved");viewSale(id)};
+}
+function irnQrSvg(text,size=120){try{if(!window.qrcode)return "";const q=qrcode(0,"L");q.addData(text);q.make();return q.createSvgTag({cellSize:2,margin:1,scalable:true}).replace("<svg ",`<svg style="width:${size}px;height:${size}px" `)}catch(e){return ""}}
+function irnQrDataUrl(text){try{if(!window.qrcode)return "";const q=qrcode(0,"L");q.addData(text);q.make();return q.createDataURL(3,2)}catch(e){return ""}}
+
+/* ---------- GSTR-1 data (shared by the screen and the portal JSON) ---------- */
+function gstr1Data(F,T){
+  const B2CL_LIMIT=100000,inR=d=>d.date>=F&&d.date<=T;
+  const sales=S.sales.filter(inR),live=sales.filter(s=>s.status!=="cancelled");
+  const rateRows=lines=>{const g={};for(const l of lines){(g[l.gst]=g[l.gst]||{rate:l.gst,tx:0,c:0,sg:0,i:0});g[l.gst].tx+=l.taxable;g[l.gst].c+=l.cgst;g[l.gst].sg+=l.sgst;g[l.gst].i+=l.igst}return Object.values(g).map(r=>({...r,tx:r2(r.tx),c:r2(r.c),sg:r2(r.sg),i:r2(r.i)}))};
+  const b2b=live.filter(s=>s.party?.gstin),b2cl=live.filter(s=>!s.party?.gstin&&s.inter&&docCalc(s).grand>B2CL_LIMIT),b2clIds=new Set(b2cl.map(s=>s.id));
+  const b2csSrc=live.filter(s=>!s.party?.gstin&&!b2clIds.has(s.id));
+  const cns=liveNotes("creditNotes").filter(inR);
+  const cnB2B=cns.filter(n=>n.party?.gstin),cnRest=cns.filter(n=>!n.party?.gstin);
+  const srcB2CL=n=>{const s=byId("sales",n.srcId);return s&&!s.party?.gstin&&s.inter&&docCalc(s).grand>B2CL_LIMIT};
+  const cnB2CL=cnRest.filter(srcB2CL),cnB2CS=cnRest.filter(n=>!srcB2CL(n));
+  const cs={};
+  const addCS=(pos,inter,rr,sign)=>{for(const r of rr){const k=pos+"|"+r.rate;(cs[k]=cs[k]||{pos,rate:r.rate,tx:0,c:0,sg:0,i:0,inter});cs[k].tx+=sign*r.tx;cs[k].c+=sign*r.c;cs[k].sg+=sign*r.sg;cs[k].i+=sign*r.i}};
+  for(const s of b2csSrc)addCS(s.pos,s.inter,rateRows(docCalc(s).lines),1);
+  for(const n of cnB2CS)addCS(n.pos,n.inter,rateRows(noteCalc(n).lines),-1);
+  const b2cs=Object.values(cs).map(r=>({...r,tx:r2(r.tx),c:r2(r.c),sg:r2(r.sg),i:r2(r.i)})).filter(r=>Math.abs(r.tx)>0.004).sort((a,b)=>(a.pos+a.rate).localeCompare(b.pos+b.rate));
+  const hsnOf=(docs,notes)=>{const h={};const add=(lines,sign)=>{for(const l of lines){const k=l.hsn+"|"+l.gst+"|"+l.unit;(h[k]=h[k]||{hsn:l.hsn,desc:l.name,unit:l.unit,rate:l.gst,q:0,tx:0,c:0,sg:0,i:0});h[k].q+=sign*l.qty;h[k].tx+=sign*l.taxable;h[k].c+=sign*l.cgst;h[k].sg+=sign*l.sgst;h[k].i+=sign*l.igst}};
+    for(const s of docs)add(docCalc(s).lines,1);for(const n of notes)add(noteCalc(n).lines,-1);
+    return Object.values(h).map(r=>({...r,q:Math.round(r.q*1000)/1000,tx:r2(r.tx),c:r2(r.c),sg:r2(r.sg),i:r2(r.i)})).sort((a,b)=>String(a.hsn).localeCompare(String(b.hsn)))};
+  const hsnB2B=hsnOf(b2b,cnB2B),hsnB2C=hsnOf(live.filter(s=>!s.party?.gstin),cnRest);
+  const series=(list,nature)=>{const g={};for(const s of list){const k=String(s.no).slice(0,String(s.no).lastIndexOf("/")+1);(g[k]=g[k]||[]).push(s)}
+    return Object.values(g).map(l=>{l.sort((a,b)=>a.seq-b.seq);return {nature,from:l[0].no,to:l[l.length-1].no,total:l.length,cancel:l.filter(x=>x.status==="cancelled").length}})};
+  const docs=[...series(sales,"Invoices for outward supply"),...series(S.creditNotes.filter(inR),"Credit Note")];
+  return {b2b,b2cl,b2cs,cnB2B,cnB2CL,cnB2CS,hsnB2B,hsnB2C,docs,rateRows,live,sales};
+}
+function gstr1Json(F,T){
+  const B=S.settings,d=gstr1Data(F,T),[y,m]=T.split("-");
+  const itm=rr=>rr.map((r,i)=>({num:i+1,itm_det:{txval:r.tx,rt:r.rate,iamt:r.i,camt:r.c,samt:r.sg,csamt:0}}));
+  const out={gstin:B.gstin||"",fp:`${m}${y}`,version:"GST2.2",hash:"hash",gt:0,cur_gt:0};
+  const byCtin={};for(const s of d.b2b){const c=docCalc(s);(byCtin[s.party.gstin]=byCtin[s.party.gstin]||[]).push({inum:s.no,idt:fmtDate(s.date),val:c.grand,pos:String(s.pos),rchrg:"N",inv_typ:"R",itms:itm(d.rateRows(c.lines))})}
+  if(Object.keys(byCtin).length)out.b2b=Object.entries(byCtin).map(([ctin,inv])=>({ctin,inv}));
+  const byPos={};for(const s of d.b2cl){const c=docCalc(s);(byPos[s.pos]=byPos[s.pos]||[]).push({inum:s.no,idt:fmtDate(s.date),val:c.grand,itms:itm(d.rateRows(c.lines)).map(x=>({num:x.num,itm_det:{txval:x.itm_det.txval,rt:x.itm_det.rt,iamt:x.itm_det.iamt,csamt:0}}))})}
+  if(Object.keys(byPos).length)out.b2cl=Object.entries(byPos).map(([pos,inv])=>({pos:String(pos),inv}));
+  if(d.b2cs.length)out.b2cs=d.b2cs.map(r=>({sply_ty:r.inter?"INTER":"INTRA",pos:String(r.pos),typ:"OE",txval:r.tx,rt:r.rate,iamt:r.i,camt:r.c,samt:r.sg,csamt:0}));
+  const nt={};for(const n of d.cnB2B){const c=noteCalc(n);(nt[n.party.gstin]=nt[n.party.gstin]||[]).push({ntty:"C",nt_num:n.no,nt_dt:fmtDate(n.date),pos:String(n.pos),rchrg:"N",inv_typ:"R",val:c.grand,itms:itm(d.rateRows(c.lines))})}
+  if(Object.keys(nt).length)out.cdnr=Object.entries(nt).map(([ctin,n])=>({ctin,nt:n}));
+  if(d.cnB2CL.length)out.cdnur=d.cnB2CL.map(n=>{const c=noteCalc(n);return {typ:"B2CL",ntty:"C",nt_num:n.no,nt_dt:fmtDate(n.date),pos:String(n.pos),val:c.grand,itms:itm(d.rateRows(c.lines)).map(x=>({num:x.num,itm_det:{txval:x.itm_det.txval,rt:x.itm_det.rt,iamt:x.itm_det.iamt,csamt:0}}))}});
+  const hs=rows=>rows.map((r,i)=>({num:i+1,hsn_sc:String(r.hsn||""),desc:String(r.desc||"").slice(0,30),user_desc:String(r.desc||"").slice(0,30),uqc:String(r.unit||"NOS").toUpperCase(),qty:r.q,rt:r.rate,txval:r.tx,iamt:r.i,camt:r.c,samt:r.sg,csamt:0}));
+  out.hsn={hsn_b2b:hs(d.hsnB2B),hsn_b2c:hs(d.hsnB2C)};
+  if(d.docs.length){const inv=d.docs.filter(x=>x.nature!=="Credit Note"),cn=d.docs.filter(x=>x.nature==="Credit Note");const det=[];
+    const docsOf=l=>l.map((x,i)=>({num:i+1,from:x.from,to:x.to,totnum:x.total,cancel:x.cancel,net_issue:x.total-x.cancel}));
+    if(inv.length)det.push({doc_num:1,docs:docsOf(inv)});if(cn.length)det.push({doc_num:5,docs:docsOf(cn)});out.doc_issue={doc_det:det}}
+  return out;
+}
+async function downloadGstr1Json(F,T){
+  const B=S.settings;if(!B.gstin||!GSTIN_RE.test(B.gstin)){toast("Add your GSTIN in Settings first");return}
+  const [y,m]=T.split("-");if(F.slice(0,7)!==T.slice(0,7)){toast("GSTR-1 JSON is for one month at a time (or one quarter for QRMP: choose the quarter's last month). Set From and To in the same month.");return}
+  const j=gstr1Json(F,T);
+  await saveFile(`GSTR1_${B.gstin}_${m}${y}.json`,new Blob([JSON.stringify(j)],{type:"application/json"}),"application/json");
+}
+
+/* ---------- outstanding & ageing ---------- */
+function outstandingData(asAt){
+  const age=d=>Math.max(0,daysBetween(d,asAt)),bucket=n=>n<=30?0:n<=60?1:n<=90?2:3;
+  const cnBySale={};for(const n of liveNotes("creditNotes"))if(n.refund==="adjust")cnBySale[n.srcId]=(cnBySale[n.srcId]||0)+noteCalc(n).grand;
+  const rec=S.sales.filter(s=>s.status!=="cancelled"&&s.date<=asAt&&payInfo(s).status!=="paid").map(s=>{const due=r2(docCalc(s).grand-(cnBySale[s.id]||0));return {d:s,party:s.party?.name||"",phone:s.party?.phone||"",key:s.partyId||("b2c:"+(s.party?.phone||s.party?.name)),no:s.no,date:s.date,amt:due,days:age(s.date)}}).filter(r=>r.amt>0.009);
+  const dnByPur={};for(const n of liveNotes("debitNotes"))if(n.refund==="adjust")dnByPur[n.srcId]=(dnByPur[n.srcId]||0)+noteCalc(n).grand;
+  const pay=S.purchases.filter(p=>p.date<=asAt&&(!p.paidOn||p.paidOn>asAt)).map(p=>{const td=S.tds.find(x=>x.purchaseId===p.id),t=purTerms(p),due=r2(docCalc(p).grand-(td?num(td.tds):0)-(dnByPur[p.id]||0));return {d:p,party:p.party?.name||"",key:p.partyId,no:p.billNo,date:p.date,dueDate:t.due,amt:due,days:age(p.date),over:Math.max(0,daysBetween(t.due,asAt))}}).filter(r=>r.amt>0.009);
+  const group=rows=>{const g={};for(const r of rows){const x=(g[r.key]=g[r.key]||{party:r.party,phone:r.phone,rows:[],b:[0,0,0,0],tot:0});x.rows.push(r);x.b[bucket(r.days)]+=r.amt;x.tot+=r.amt}return Object.values(g).sort((a,b)=>b.tot-a.tot)};
+  return {rec,pay,recG:group(rec),payG:group(pay)};
+}
+function reminderText(g){const B=S.settings;return `Dear ${g.party},\nThis is a gentle reminder from ${B.name||"us"}. The following bills are pending:\n${g.rows.map(r=>`• ${r.no} dated ${fmtDate(r.date)}: Rs. ${inr.format(r.amt)}`).join("\n")}\nTotal due: Rs. ${inr.format(g.tot)}.${B.upiId?`\nPay by UPI: ${B.upiId}`:""}\nThank you.`}
+function outstandingReport(){
+  const t=todayISO(),asAt=sub.to||t;sub.to=asAt;const d=outstandingData(asAt),side=sub.os||"rec",G=side==="rec"?d.recG:d.payG;
+  const tot=G.reduce((a,g)=>a+g.tot,0),bt=[0,1,2,3].map(i=>G.reduce((a,g)=>a+g.b[i],0));
+  sub._exportDoc=()=>({title:side==="rec"?"Receivables ageing":"Payables ageing",subtitle:`As at ${fmtDate(asAt)}`,sheets:[{name:"Summary",head:["Party","0–30 days","31–60 days","61–90 days","Over 90 days","Total"],rows:G.map(g=>[g.party,...g.b.map(r2),r2(g.tot)]),foot:["Total",...bt.map(r2),r2(tot)]},
+    {name:"Bills",head:["Party","Bill","Date",side==="rec"?"Days":"Days since bill","Amount due"],rows:G.flatMap(g=>g.rows.map(r=>[g.party,r.no,fmtDate(r.date),r.days,r.amt]))}]});
+  return `<div class="filters"><label class="f"><span>As at</span><input class="input" type="date" id="rTo" value="${asAt}"></label>
+   <div class="seg" role="group"><button type="button" data-os="rec" aria-pressed="${side==="rec"}">Receivables<small>Customers owe you</small></button><button type="button" data-os="pay" aria-pressed="${side==="pay"}">Payables<small>You owe vendors</small></button></div>
+   <div class="row" style="margin-left:auto">${expBtns()}</div></div>
+  <div class="tiles">${["0–30 days","31–60 days","61–90 days","Over 90 days"].map((l,i)=>`<div class="tile ${["t-sales","t-buy","t-stock","t-cash"][i]}"><span class="ib">${ic("clock")}</span><div class="k">${l}</div><div class="v" style="${i===3&&bt[3]>0?"color:var(--bad)":""}">${money(bt[i])}</div><div class="n">${tot?Math.round(bt[i]/tot*100):0}% of ${money(tot)}</div></div>`).join("")}</div>
+  <div class="tablewrap">${G.length?`<table><thead><tr><th>${side==="rec"?"Customer":"Vendor"}</th><th class="num">0–30</th><th class="num">31–60</th><th class="num">61–90</th><th class="num">90+</th><th class="num">Total due</th><th></th></tr></thead><tbody>${G.map((g,i)=>`<tr><td><b>${esc(g.party)}</b><div class="hint">${g.rows.length} bill${g.rows.length>1?"s":""} · oldest ${Math.max(...g.rows.map(r=>r.days))} days</div></td>${g.b.map((v,j)=>`<td class="num"${j===3&&v>0?' style="color:var(--bad)"':""}>${v?amt(v):""}</td>`).join("")}<td class="num"><b>${amt(g.tot)}</b></td><td>${side==="rec"&&waNumber(g.phone)?`<a class="btn sm wa" href="https://wa.me/${waNumber(g.phone)}?text=${encodeURIComponent(reminderText(g))}" target="_blank" rel="noopener">Remind</a>`:""}</td></tr>`).join("")}</tbody><tfoot><tr><td>Total</td>${bt.map(v=>`<td class="num">${amt(v)}</td>`).join("")}<td class="num">${amt(tot)}</td><td></td></tr></tfoot></table>`:`<div class="empty"><b>Nothing outstanding</b>${side==="rec"?"Every invoice is paid.":"Every purchase bill is paid."}</div>`}</div>
+  <p class="hint" style="margin-top:8px">${side==="rec"?"Unpaid and pay-later invoices, less credit notes adjusted against them. Record money received with “Collect payment” on the invoice.":"Unpaid purchase bills, less TDS and debit notes. Mark bills paid from Purchases."}</p>`;
+}
+
+/* ---------- day book ---------- */
+function aDayBook(){
+  const range=acctRange(),P=buildPostings().filter(p=>p.date>=sub.from&&p.date<=sub.to);
+  const nm=id=>ledgerById(id)?.name||id;
+  sub._exportDoc=()=>({title:"Day book",subtitle:`${fmtDate(sub.from)} to ${fmtDate(sub.to)}`,sheets:[{name:"Day book",head:["Date","Voucher type","Voucher no","Ledger","Debit","Credit","Narration"],rows:P.flatMap(p=>p.lines.map((x,i)=>[i?"":fmtDate(p.date),i?"":p.type,i?"":p.no,nm(x.l),x.dr||"",x.cr||"",i?"":p.narr]))}]});
+  return range+`<div class="tablewrap">${P.length?`<table><thead><tr><th>Date</th><th>Voucher</th><th>Particulars</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead><tbody>${P.slice().reverse().slice(0,1500).map(p=>`<tr><td class="mono">${fmtDate(p.date)}</td><td><span class="chip">${esc(p.type)}</span><div class="hint mono">${esc(p.no||"")}</div></td><td>${p.lines.map(x=>`<div>${x.dr?"Dr":"Cr"} ${esc(nm(x.l))}</div>`).join("")}<div class="hint">${esc(p.narr)}</div></td><td class="num">${p.lines.map(x=>`<div>${x.dr?amt(x.dr):"&nbsp;"}</div>`).join("")}</td><td class="num">${p.lines.map(x=>`<div>${x.cr?amt(x.cr):"&nbsp;"}</div>`).join("")}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">No entries in this period.</div>`}</div>`;
+}
+
+/* ---------- GST & E-way hub ---------- */
+function vGst(){
+  const t=todayISO(),[pm1,pm2]=monthRange(-1),[tm1,tm2]=monthRange(0),B=S.settings;
+  const due=(d,day)=>{let [y,m]=d.split("-").map(Number);m+=1;if(m>12){m=1;y++}return `${y}-${String(m).padStart(2,"0")}-${String(day).padStart(2,"0")}`};
+  const pend=S.sales.filter(s=>ewbNeeded(s)&&!s.ewb?.no&&s.date>=addDays(t,-15));
+  const einvPend=einvOn()?S.sales.filter(s=>s.status!=="cancelled"&&s.party?.gstin&&!s.irn?.irn&&s.date>=addDays(t,-30)):[];
+  const gOk=B.gstin&&gstinChecksumOk(B.gstin);
+  const card=(title,body)=>`<div class="panel" style="display:flex;flex-direction:column;gap:10px"><h2 style="margin:0">${title}</h2>${body}</div>`;
+  const lnk=(href,label,sub2)=>`<a class="btn" href="${href}" target="_blank" rel="noopener" style="justify-content:space-between;width:100%"><span><b>${label}</b><div class="hint" style="font-weight:400">${sub2}</div></span><span>↗</span></a>`;
+  return `<div class="head"><div><h1>GST &amp; E-way bill</h1><div class="sub">Everything you need for the GST portal, e-way bills and e-invoices in one place. Ledgerbook prepares the files; you upload them on the official portal.</div></div></div>
+  ${B.gstin?(gOk?"":`<div class="banner">Your GSTIN ${esc(B.gstin)} fails the checksum test. Check it in Settings for a typing mistake.</div>`):`<div class="banner">Add your GSTIN, PIN code and city in <button class="link" data-go="settings">Settings</button> first.</div>`}
+  <div class="grid g3" style="margin-bottom:16px">
+   ${card("Portals",`${lnk("https://services.gst.gov.in/services/login","GST portal login","Returns, payments, notices")}${lnk("https://ewaybillgst.gov.in/","E-way bill portal","Generate, extend, cancel EWB")}${lnk("https://einvoice1.gst.gov.in/","E-invoice portal (IRP)","IRN for B2B invoices")}${lnk("https://services.gst.gov.in/services/searchtp","Search a GSTIN","Check a customer or vendor")}`)}
+   ${card("GSTR-1 for last month",`<p class="hint" style="margin:0">${fmtDate(pm1)} – ${fmtDate(pm2)} · due ${fmtDate(due(pm1,11))} (monthly) or ${fmtDate(due(pm1,13))} (IFF/QRMP)</p>
+     <button class="btn pri" data-act="gstr1json" data-f="${pm1}" data-t="${pm2}">${ic("sales")} Download GSTR-1 JSON</button><button class="btn" data-act="gstr1jsonThis" data-f="${tm1}" data-t="${tm2}">This month so far</button>
+     <p class="hint" style="margin:0">On the GST portal: <b>Returns Dashboard → GSTR-1 → Prepare Offline → Upload</b>, choose the file, then review and file with DSC/EVC.</p>`)}
+   ${card("GSTR-3B",`<p class="hint" style="margin:0">Due ${fmtDate(due(pm1,20))} (monthly) or 22nd/24th (QRMP). Ledgerbook works out tax payable, input credit and cash to pay.</p><button class="btn" data-go3b="1">Open GSTR-3B summary</button><p class="hint" style="margin:0">Match input credit with GSTR-2B on the portal before filing.</p>`)}
+  </div>
+  <div class="grid g2">
+   ${card(`E-way bills ${pend.length?`<span class="chip warn">${pend.length} pending</span>`:`<span class="chip good">Up to date</span>`}`,`<p class="hint" style="margin:0">Needed when goods worth over ₹50,000 move (intra-state limits vary by state). Ledgerbook makes the upload file for the portal's <b>Generate Bulk</b> option.</p>
+     ${pend.length?`<div class="tablewrap"><table><tbody>${pend.slice(0,6).map(s=>`<tr><td class="mono"><button class="link" data-view-sale="${s.id}">${esc(s.no)}</button></td><td>${esc(s.party?.name)}</td><td class="num">${amt(docCalc(s).grand)}</td><td><button class="btn sm" data-ewb="${s.id}">Details</button></td></tr>`).join("")}</tbody></table></div>`:""}
+     <button class="btn" data-goewb="1">Open e-way bill register</button>`)}
+   ${card(`E-invoice (IRN) ${einvOn()?(einvPend.length?`<span class="chip warn">${einvPend.length} without IRN</span>`:`<span class="chip good">Up to date</span>`):`<span class="chip">Off</span>`}`,`<p class="hint" style="margin:0">Required for B2B invoices when your yearly turnover is above ₹5 crore. ${einvOn()?"":"Turn it on in Settings if it applies to you."}</p>${einvOn()?`<button class="btn" data-goewb="1">Open register</button>`:""}`)}
+  </div>
+  <div class="panel" style="margin-top:16px"><h2 style="margin-top:0">Direct filing from Ledgerbook</h2><p class="hint" style="margin:0">Filing returns and generating e-way bills straight from software (without uploading files) goes through a licensed GST Suvidha Provider (GSP). You create an “API user” on the portal and link it to the GSP. Ledgerbook already produces the exact data those APIs need, so a GSP connection can be added once you choose a provider.</p></div>`;
+}
+function ewbRegister(){
+  const range=rangeFilters(),rows=S.sales.filter(inRange).filter(s=>s.status!=="cancelled").sort((a,b)=>b.date.localeCompare(a.date));
+  const need=rows.filter(s=>ewbNeeded(s)||s.ewb?.no||s.ewbInfo),pend=need.filter(s=>!s.ewb?.no&&ewbNeeded(s)),einvPend=einvOn()?rows.filter(s=>s.party?.gstin&&!s.irn?.irn):[];
+  sub._export=()=>[["Invoice","Date","Customer","GSTIN","Value","E-way bill no","Valid until","Vehicle","IRN"],...need.map(s=>[s.no,fmtDate(s.date),s.party?.name,s.party?.gstin||"URP",docCalc(s).grand,s.ewb?.no||"",fmtDate(s.ewb?.validUntil||""),s.ewbInfo?.vehicle||"",s.irn?.irn||""])];sub._file=`EWB_register_${sub.from}_to_${sub.to}.csv`;
+  return range+`<div class="row" style="margin-bottom:10px;gap:10px"><button class="btn pri" data-act="ewbBulk"${pend.length?"":" disabled"}>${ic("sales")} Download JSON for ${pend.length} pending e-way bill${pend.length===1?"":"s"}</button>${einvOn()?`<button class="btn" data-act="einvBulk"${einvPend.length?"":" disabled"}>${ic("sales")} E-invoice JSON for ${einvPend.length} invoice${einvPend.length===1?"":"s"}</button>`:""}<a class="btn" href="https://ewaybillgst.gov.in/" target="_blank" rel="noopener">E-way bill portal ↗</a></div>
+  <div class="tablewrap">${need.length?`<table><thead><tr><th>Invoice</th><th>Customer</th><th class="num">Value</th><th>Transport</th><th>E-way bill</th>${einvOn()?"<th>IRN</th>":""}<th></th></tr></thead><tbody>${need.map(s=>`<tr><td class="mono"><button class="link" data-view-sale="${s.id}">${esc(s.no)}</button><div class="hint">${fmtDate(s.date)}</div></td><td>${esc(s.party?.name)}<div class="hint mono">${esc(s.party?.gstin||"URP")}</div></td><td class="num">${amt(docCalc(s).grand)}</td><td class="hint">${esc([s.ewbInfo?.vehicle,s.ewbInfo?.transName].filter(Boolean).join(" · ")||"—")}</td><td>${s.ewb?.no?`<span class="chip good mono">${esc(s.ewb.no)}</span>${s.ewb.validUntil?`<div class="hint">till ${fmtDate(s.ewb.validUntil)}</div>`:""}`:ewbNeeded(s)?'<span class="chip warn">Pending</span>':'<span class="chip">Optional</span>'}</td>${einvOn()?`<td>${s.irn?.irn?'<span class="chip good">IRN</span>':s.party?.gstin?'<span class="chip warn">Pending</span>':""}</td>`:""}<td><button class="btn sm" data-ewb="${s.id}">E-way bill</button>${einvOn()&&s.party?.gstin?` <button class="btn sm" data-irn="${s.id}">IRN</button>`:""}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No invoices above ₹50,000 in this period</b>E-way bills are needed when goods worth over ₹50,000 move.</div>`}</div>`;
+}
+
 /* ---------- Settings ---------- */
 function vSettings(){
   const B=S.settings,hasSample=COLLS.some(c=>S[c].some(x=>x.sample));
@@ -1967,7 +2310,10 @@ function vSettings(){
    <label class="f req"><span>Business name</span><input class="input" id="st_name" value="${esc(B.name)}"></label>
    <label class="f"><span>GSTIN</span><input class="input" id="st_gstin" maxlength="15" style="text-transform:uppercase;font-family:var(--f-mono)" value="${esc(B.gstin)}"></label>
    <label class="f req spanall"><span>Address</span><input class="input" id="st_addr" value="${esc(B.address)}"></label>
+   <label class="f"><span>City</span><input class="input" id="st_city" value="${esc(B.city||"")}"></label>
+   <label class="f"><span>PIN code</span><input class="input mono" id="st_pin" maxlength="6" inputmode="numeric" value="${esc(B.pin||"")}"></label>
    <label class="f req"><span>State</span><select class="input" id="st_state">${stateOpts(B.state)}</select></label>
+   <label class="check" style="align-self:end;padding-bottom:8px"><input type="checkbox" id="st_einv"${B.einvoice?" checked":""}> E-invoicing applies (turnover above ₹5 crore)</label>
    <label class="f"><span>Phone</span><input class="input" id="st_phone" value="${esc(B.phone)}"></label>
    <label class="f"><span>Email</span><input class="input" id="st_email" value="${esc(B.email)}"></label>
    <label class="f"><span>Invoice prefix</span><input class="input mono" id="st_prefix" value="${esc(B.prefix??"INV/")}"><span class="hint">Number looks like ${esc((B.prefix??"INV/")+fyOf(todayISO()))}/0001</span></label>
@@ -2035,11 +2381,13 @@ function bindView(){
     const g=$("#st_gstin").value.trim().toUpperCase(),stc=$("#st_state").value;
     if(!$("#st_name").value.trim()||!stc){$("#stErr").innerHTML=`<div class="err">Enter the business name and choose your state.</div>`;return}
     if(g&&!GSTIN_RE.test(g)){$("#stErr").innerHTML=`<div class="err">GSTIN format looks wrong. It has 15 characters and starts with your state code.</div>`;return}
+    if(g&&!gstinChecksumOk(g)){$("#stErr").innerHTML=`<div class="err">This GSTIN fails the checksum test, so one character is probably mistyped. Check it against your registration certificate.</div>`;return}
+    if($("#st_pin").value.trim()&&!/^\d{6}$/.test($("#st_pin").value.trim())){$("#stErr").innerHTML=`<div class="err">PIN code has 6 digits.</div>`;return}
     if(g&&g.slice(0,2)!==stc){$("#stErr").innerHTML=`<div class="err">GSTIN starts with ${g.slice(0,2)} but the state is ${stc}. Make them match.</div>`;return}
     const vpa=$("#st_upiId").value.trim();
     if(vpa&&!/^[\w.\-]{2,256}@[a-zA-Z][a-zA-Z0-9.\-]{1,63}$/.test(vpa)){$("#stErr").innerHTML=`<div class="err">The UPI ID looks wrong. It has the form name@bank, for example shopname@okhdfcbank.</div>`;return}
     if($("#st_waMode").value==="api"&&(!$("#st_waPid").value.trim()||!$("#st_waTok").value.trim()||!$("#st_waTpl").value.trim())){$("#stErr").innerHTML=`<div class="err">Automatic sending needs the phone number ID, access token and template name from your Meta WhatsApp Business account.</div>`;return}
-    await guard(()=>backend.saveSettings({...S.settings,name:$("#st_name").value.trim(),gstin:g,address:$("#st_addr").value.trim(),state:stc,phone:$("#st_phone").value.trim(),email:$("#st_email").value.trim(),prefix:$("#st_prefix").value.trim(),bank:$("#st_bank").value.trim(),invNote:$("#st_note").value.trim(),terms:$("#st_terms").value.trim(),
+    await guard(()=>backend.saveSettings({...S.settings,name:$("#st_name").value.trim(),gstin:g,address:$("#st_addr").value.trim(),state:stc,city:$("#st_city").value.trim(),pin:$("#st_pin").value.trim(),einvoice:$("#st_einv").checked,phone:$("#st_phone").value.trim(),email:$("#st_email").value.trim(),prefix:$("#st_prefix").value.trim(),bank:$("#st_bank").value.trim(),invNote:$("#st_note").value.trim(),terms:$("#st_terms").value.trim(),
       upiId:$("#st_upiId").value.trim(),upiName:$("#st_upiName").value.trim(),
       waMode:$("#st_waMode").value,waMsg:$("#st_waMsg").value,printLayout:$("#st_print").value,autoPrint:$("#st_autoPrint").checked,
       waApiPhoneId:$("#st_waPid").value.trim(),waApiToken:$("#st_waTok").value.trim(),waApiTemplate:$("#st_waTpl").value.trim(),waApiLang:$("#st_waLang").value.trim(),waApiVars:$("#st_waVars").value.trim()}));toast("Settings saved");
@@ -2071,6 +2419,15 @@ $("#main").addEventListener("click",async e=>{
   if(t.dataset.stmt){if(view!=="accounts")go("accounts");sub.atab="statement";sub.lid=t.dataset.stmt;return renderView()}
   if(t.dataset.editLedger)return openLedgerForm(t.dataset.editLedger);
   if(t.dataset.editUser)return openUserForm(t.dataset.editUser);
+  if(t.dataset.stab){sub={stab:t.dataset.stab};return renderView()}
+  if(t.dataset.ptab){sub={ptab:t.dataset.ptab};return renderView()}
+  if(t.dataset.note){const [k,id]=t.dataset.note.split(":");return viewNote(k,id)}
+  if(t.dataset.quote)return viewQuote(t.dataset.quote);
+  if(t.dataset.ewb)return openEwbForm(t.dataset.ewb);
+  if(t.dataset.irn)return openIrnForm(t.dataset.irn);
+  if(t.dataset.os){sub.os=t.dataset.os;return renderView()}
+  if(t.dataset.go3b){go("reports");sub.tab="gstr3b";const [a,b]=monthRange(-1);sub.from=a;sub.to=b;return renderView()}
+  if(t.dataset.goewb){go("reports");sub.tab="ewb";return renderView()}
   if(t.dataset.audit!==undefined)return openAuditDetail(+t.dataset.audit);
   if(t.dataset.editVoucher)return openVoucherForm(null,t.dataset.editVoucher);
   if(t.dataset.payPur){const pu=byId("purchases",t.dataset.payPur);if(pu){await guard(()=>backend.put("purchases",{...pu,paidOn:todayISO()}));toast(`Bill ${pu.billNo} marked paid today`)}return}
@@ -2088,6 +2445,10 @@ $("#main").addEventListener("click",async e=>{
   if(a==="newTds")openTdsForm();
   if(a==="newLedger")openLedgerForm();
   if(a==="newUser")return openUserForm();
+  if(a==="newQuote")return openSaleForm({quote:true});
+  if(a==="gstr1json"||a==="gstr1jsonThis")return downloadGstr1Json(t.dataset.f,t.dataset.t);
+  if(a==="ewbBulk"){const list=S.sales.filter(inRange).filter(x=>ewbNeeded(x)&&!x.ewb?.no);return downloadEwbJson(list)}
+  if(a==="einvBulk"){const list=S.sales.filter(inRange).filter(x=>x.status!=="cancelled"&&x.party?.gstin&&!x.irn?.irn);const bad=list.find(x=>einvProblems(x).length);if(bad){toast(`${bad.no}: add ${einvProblems(bad).join(", ")}`);return}return saveFile(`EINV_${todayISO()}_${list.length}.json`,new Blob([JSON.stringify(list.map(einvJson),null,1)],{type:"application/json"}),"application/json")}
   if(a==="connect")return openConnectForm();
   if(a==="signOut")return signOut();
   if(a==="changePw")return openPasswordForm();
@@ -2102,7 +2463,7 @@ $("#main").addEventListener("click",async e=>{
   if(a==="presetLedgers"){const have=new Set(allLedgers().map(l=>l.name.toLowerCase()));for(const [n,g] of EXP_PRESETS)if(!have.has(n.toLowerCase()))await guard(()=>backend.put("ledgers",{id:"L"+uid(),name:n,group:g,opening:0,openingType:"Dr"}));toast("Common ledgers added");return}
   if(a==="exportReport"&&sub._export)saveFile(sub._file,csv(sub._export()),"text/csv");
   if(a==="exportStock")saveFile(`stock_${todayISO()}.csv`,csv([["SKU","Item","HSN","Unit","Opening","Purchased","Sold","In stock","Value at cost"],...S.items.map(i=>{const s=stockOf(i.id);return [i.sku,i.name,i.hsn,i.unit,s.open,s.inQ,s.outQ,s.bal,r2(s.bal*num(i.purchasePrice))]})]),"text/csv");
-  if(a==="backup"){const counters={};for(const s of S.sales)counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));saveFile(`ledgerbook-backup_${todayISO()}.json`,JSON.stringify({app:"ledgerbook",v:1,at:new Date().toISOString(),settings:S.settings,counters:{...counters,...S.counters},items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers},null,1),"application/json")}
+  if(a==="backup"){const counters={};for(const s of S.sales)counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));saveFile(`ledgerbook-backup_${todayISO()}.json`,JSON.stringify({app:"ledgerbook",v:1,at:new Date().toISOString(),settings:S.settings,counters:{...counters,...S.counters},items:S.items,customers:S.customers,vendors:S.vendors,purchases:S.purchases,sales:S.sales,tds:S.tds,ledgers:S.ledgers,vouchers:S.vouchers,creditNotes:S.creditNotes,debitNotes:S.debitNotes,quotes:S.quotes},null,1),"application/json")}
   if(a==="clearSample"){confirmIn("#dataMsg","Remove every record marked Sample? Real records stay.",async()=>{
     for(const c of COLLS)for(const o of S[c].filter(x=>x.sample))await backend.remove(c,o.id);
     const counters={};for(const s of S.sales.filter(x=>!x.sample))counters[s.fy]=Math.max(counters[s.fy]||0,num(s.seq));
