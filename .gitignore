@@ -8,3 +8,7 @@ out/
 # Signing key: never commit. Stored in GitHub Secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD).
 app/ledgerbook-release.jks
 app/keystore.properties
+
+# Licence signing key: never commit
+licence-private-key.json
+*private-key*.json

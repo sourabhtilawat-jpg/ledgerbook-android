@@ -227,6 +227,10 @@ legend{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 .fsb .ib{grid-row:span 2;width:42px;height:42px;border-radius:11px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
 .fsb b{font-size:15px}.fsb small{color:var(--muted);font-size:12.5px;font-family:var(--f-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:1000px){.fs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.banner.lic{display:flex;align-items:center;flex-wrap:wrap;gap:4px;background:var(--saffron-soft);color:var(--saffron-ink)}.banner.lic.bad{background:var(--bad-soft);color:var(--bad)}
+.licst{display:flex;flex-direction:column;gap:2px;border-radius:12px;padding:14px 16px;border-left:5px solid var(--good);background:var(--good-soft)}.licst b{font-size:17px;color:var(--ink)}.licst span{font-size:13px;color:var(--muted)}
+.licst.warn{border-color:var(--saffron);background:var(--saffron-soft)}.licst.bad{border-color:var(--bad);background:var(--bad-soft)}
+.licprice{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}.licprice div{border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}.licprice b{display:block;font-size:22px;color:var(--accent)}.licprice span{font-size:12px;color:var(--muted)}
 .feats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .feat{display:flex;gap:10px;align-items:flex-start;border:1.5px solid var(--line);border-radius:12px;padding:12px;cursor:pointer}
 .feat.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 50%,transparent)}
@@ -282,7 +286,7 @@ const STATE_NAME=Object.fromEntries(STATES);
 const GST_RATES=[0,0.25,3,5,12,18,28,40];
 const UNITS=["PCS","NOS","BOX","BAG","KGS","GMS","LTR","MTR","SET","PAC","DOZ","BTL","ROL","SQM"];
 const COLLS=["items","customers","vendors","purchases","sales","tds","ledgers","vouchers","creditNotes","debitNotes","quotes","salesOrders","challans","purchaseOrders","recurring","transfers","productions","bankStmt","reco","gstr2b","employees","payruns"];
-const APP_VERSION="2.0.1";
+const APP_VERSION="2.1";
 const DEVELOPER="Sourabh Tilawat";
 /* TDS on resident payments under section 393(1), Income-tax Act 2025 (from 1 Apr 2026). Old 1961-Act section shown for familiarity.
    Rates per published FY 2026-27 rate charts; payment codes are left for the user because published code lists differ. */
@@ -606,9 +610,9 @@ function go(v,s){view=v;sub=s||{};try{history.replaceState(null,"","#"+v)}catch(
 document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&String(e.key).toLowerCase()==="k"){e.preventDefault();if(READY)openSearch();return}if($("#modalRoot").firstChild){if(e.key==="Escape")closeModal();return}if(/INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName))return;if(e.metaKey||e.ctrlKey||e.altKey)return;if((e.key==="s"||e.key==="S")&&can("sales.create")){e.preventDefault();openSaleForm()}if((e.key==="p"||e.key==="P")&&can("purchases.edit")){e.preventDefault();openPurchaseForm()}if(e.key==="/"){e.preventDefault();openSearch()}});
 
 function renderView(){
-  const m=$("#main");
+  const m=$("#main");licCheck();
   const fn={dashboard:vDash,items:vItems,inventory:vInventory,purchases:vPurchases,sales:vSales,customers:()=>vParties("customers"),vendors:()=>vParties("vendors"),reports:vReports,gst:vGst,accounts:vAccounts,audit:vAudit,users:vUsers,settings:vSettings,banking:vBanking,payroll:vPayroll}[viewAllowed(view)&&navOk(view)?view:(view="dashboard")]||vDash;
-  m.innerHTML=(SRV?`<div class="banner" id="connBanner"${CONN_OK?" hidden":""}>Lost connection to the server. Changes can't be saved until it's back; Ledgerbook keeps trying.</div>`:"")+(backend?.kind==="local"&&!NATIVE?`<div class="banner">Your data is saved in this browser only. Use Settings → Backup to keep a copy, or connect to a Ledgerbook Server.</div>`:"")+fn();
+  m.innerHTML=licBanner()+(SRV?`<div class="banner" id="connBanner"${CONN_OK?" hidden":""}>Lost connection to the server. Changes can't be saved until it's back; Ledgerbook keeps trying.</div>`:"")+(backend?.kind==="local"&&!NATIVE?`<div class="banner">Your data is saved in this browser only. Use Settings → Backup to keep a copy, or connect to a Ledgerbook Server.</div>`:"")+fn();
   bindView();
 }
 
@@ -669,7 +673,7 @@ function openItemForm(id){
 }
 
 function confirmIn(sel,msg,fn){$(sel).innerHTML=`<div class="confirm"><span>${esc(msg)}</span><button class="btn sm danger" id="cYes">Yes, continue</button><button class="btn sm" id="cNo">Keep it</button></div>`;$("#cYes").onclick=fn;$("#cNo").onclick=()=>$(sel).innerHTML=""}
-async function guard(fn){try{return await fn()}catch(e){toast(e?.code==="quota_exceeded"?"Storage is full. Delete old records to continue.":e?.code==="conflict"?"Someone else just changed this record. It has been refreshed; please make your change again.":e?.code==="forbidden"?"You don't have permission to do this. Ask your admin.":e?.code==="network"?"Can't reach the server, so this wasn't saved. Check the connection and try again.":"Could not save: "+(e?.message||"try again"));throw e}}
+async function guard(fn){try{return await fn()}catch(e){if(e?.code==="licence"){if(SRV)openLicenceModal(true);throw e}toast(e?.code==="quota_exceeded"?"Storage is full. Delete old records to continue.":e?.code==="conflict"?"Someone else just changed this record. It has been refreshed; please make your change again.":e?.code==="forbidden"?"You don't have permission to do this. Ask your admin.":e?.code==="network"?"Can't reach the server, so this wasn't saved. Check the connection and try again.":"Could not save: "+(e?.message||"try again"));throw e}}
 
 /* ---------- Inventory ---------- */
 /* ---------- Parties ---------- */
@@ -1810,7 +1814,7 @@ async function api(path,{method="GET",body,url,token}={}){
   if(body!==undefined)headers["Content-Type"]="application/json";if(tk)headers.Authorization="Bearer "+tk;
   let r;try{r=await fetch(base+path,{method,headers,body:body!==undefined?JSON.stringify(body):undefined})}catch(e){throw Object.assign(new Error("Can't reach the server. Check the address, the Wi-Fi/internet connection, and that the server is running."),{code:"network"})}
   let j={};try{j=await r.json()}catch(e){}
-  if(!r.ok){const err=Object.assign(new Error(j.error||("Server error "+r.status)),{status:r.status,code:r.status===409?"conflict":r.status===403?"forbidden":r.status===401?"auth":"server",current:j.current});if(r.status===401&&!url&&SRV&&SRV.token)onAuthLost();throw err}
+  if(!r.ok){const err=Object.assign(new Error(j.error||("Server error "+r.status)),{status:r.status,code:r.status===402?"licence":r.status===409?"conflict":r.status===403?"forbidden":r.status===401?"auth":"server",current:j.current});if(r.status===401&&!url&&SRV&&SRV.token)onAuthLost();if(r.status===402){SRV_LIC={...(SRV_LIC||{}),locked:true};setTimeout(()=>openLicenceModal(true),0)}throw err}
   return j;
 }
 function serverBackend(){
@@ -1823,7 +1827,7 @@ function serverBackend(){
       if(m.type==="hello"){if(!alive){alive=true;if(es._seen)loadAll().then(()=>{setConn(true);scheduleRender()});else{es._seen=true;setConn(true)}}}
       else if(m.type==="put"){upd(m.coll,m.doc);scheduleRender()}
       else if(m.type==="del"){S[m.coll]=S[m.coll].filter(x=>x.id!==m.id);scheduleRender()}
-      else if(m.type==="settings"){S.settings=m.doc;scheduleRender()}
+      else if(m.type==="settings"){S.settings=m.doc;scheduleRender();refreshMe()}
       else if(m.type==="counters"){S.counters=m.counters}
       else if(m.type==="reload"){loadAll().then(scheduleRender)}
       else if(m.type==="audit"){if(view==="audit"&&!$("#modalRoot").firstChild){auditCache=null;scheduleRender()}}
@@ -1843,7 +1847,7 @@ function serverBackend(){
 }
 function setConn(ok){CONN_OK=ok;const d=$("#storeDot"),t=$("#storeText");if(!d)return;d.className="dot "+(ok?"ok":"local");t.textContent=ok?`Live · ${SRV?hostOf(SRV.url):""}`:"Reconnecting to server…";const b=$("#connBanner");if(b)b.hidden=ok}
 const hostOf=u=>{try{return new URL(normUrl(u)).host}catch(e){return u}};
-async function refreshMe(){try{const m=await api("/api/me");ME=m.user;RIGHTS_DEF=m.rights;ROLES_DEF=m.roles;scheduleRender()}catch(e){}}
+async function refreshMe(){try{const m=await api("/api/me");ME=m.user;SRV_LIC=m.licence||null;RIGHTS_DEF=m.rights;ROLES_DEF=m.roles;scheduleRender()}catch(e){}}
 let authLostShown=false;
 function onAuthLost(){if(authLostShown)return;authLostShown=true;try{backend&&backend.close&&backend.close()}catch(e){}srvSave({url:SRV.url});showGate({url:SRV.url,msg:"Your session ended. Please sign in again."})}
 
@@ -3264,11 +3268,84 @@ function vGst(){
   return `<div class="head"><div><h1>GST &amp; E-way bill</h1><div class="sub">Returns, reconciliation and annual summaries.</div></div></div>`+T+({g2b:gstr2bTab,g9:gstr9Tab,cmp:cmp08Tab}[t])();
 }
 
+/* ================= licence: full version, ₹6,000 once (first year included) + ₹1,500 yearly renewal =================
+   Keys are signed by the developer's private key (ECDSA P-256) and checked here with the public key, offline.
+   Format: LB2-<base64url(JSON payload)>.<base64url(signature over the payload text)>
+   Payload: {v,id,n:business name,g:GSTIN,i:issued,e:expiry (inclusive),t:"full"|"trial"} */
+const LIC_PUB={kty:"EC",crv:"P-256",x:"OPhCbkfugkLwg1q9wQyKtAi7b7IxfroxqtHJcgecxDk",y:"pm9Qq3vS3egEwwSyb8H677aqzXlkbFr6sPeEzbyP-9o"};
+const LIC_PRICE={full:6000,renew:1500},TRIAL_DAYS=15,GRACE_DAYS=15;
+const DEV_PHONE="";   // developer's WhatsApp number (with 91), shown on the licence screen when set
+let LIC={state:"checking",locked:false},LIC_SIG="",SRV_LIC=null;
+const b64uBytes=s=>{s=s.replace(/-/g,"+").replace(/_/g,"/");while(s.length%4)s+="=";return Uint8Array.from(atob(s),c=>c.charCodeAt(0))};
+const normName=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+const normGst=s=>String(s||"").toUpperCase().replace(/\s/g,"");
+async function verifyLicKey(key){
+  key=String(key||"").replace(/\s+/g,"");const m=key.match(/^LB2-([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/);if(!m)return null;
+  if(!(window.crypto&&crypto.subtle))return {nocrypto:true};
+  try{const pk=await crypto.subtle.importKey("jwk",{...LIC_PUB,ext:true},{name:"ECDSA",namedCurve:"P-256"},false,["verify"]);
+    const ok=await crypto.subtle.verify({name:"ECDSA",hash:"SHA-256"},pk,b64uBytes(m[2]),new TextEncoder().encode(m[1]));
+    if(!ok)return null;const p=JSON.parse(new TextDecoder().decode(b64uBytes(m[1])));return p&&p.e&&p.n?p:null}catch(e){return null}}
+function licToday(){const t=todayISO();let seen="";try{seen=localStorage.getItem("lb_seen")||""}catch(e){}const d=seen>t?seen:t;try{if(t>seen)localStorage.setItem("lb_seen",t)}catch(e){}return d}
+const licMatches=(p,B)=>p.g?normGst(B.gstin)===normGst(p.g):normName(B.name)===normName(p.n);
+function licState(p,match,B,t){
+  if(p&&match){const d=daysBetween(t,p.e);const st=d>=0?(d<=30?"expiring":"active"):(-d<=GRACE_DAYS?"grace":"expired");return {state:st,p,daysLeft:d,graceLeft:GRACE_DAYS+d,locked:st==="expired",trialKey:p.t==="trial"}}
+  const inst=B.installedOn||t,left=TRIAL_DAYS-daysBetween(inst,t);return {state:left>=0?"trial":"locked",daysLeft:left,mismatch:p&&!match?p:null,locked:left<0}}
+async function computeLic(){
+  const B=S.settings;
+  if(SRV){LIC=SRV_LIC||{state:"active",locked:false};LIC_SIG="srv:"+JSON.stringify(SRV_LIC);return}
+  const p=B.licence?await verifyLicKey(B.licence):null;
+  if(p&&p.nocrypto){LIC={state:"active",locked:false,unverified:true};return}
+  LIC={...licState(p,p&&licMatches(p,B),B,licToday()),bad:!!B.licence&&!p,key:B.licence||""};
+}
+const licSigOf=()=>SRV?"srv:"+JSON.stringify(SRV_LIC):JSON.stringify([S.settings.licence,S.settings.name,S.settings.gstin,S.settings.installedOn,todayISO()]);
+function licCheck(){if(licSigOf()===LIC_SIG)return;LIC_SIG=licSigOf();computeLic().then(()=>{renderShell();renderView()})}
+function licBanner(){
+  const L=LIC,btn=t=>`<button class="btn sm" data-act="licence" style="margin-left:10px">${t}</button>`;
+  if(L.state==="trial")return `<div class="banner lic">Free trial: <b>${L.daysLeft} day${L.daysLeft===1?"":"s"} left</b>. Full version licence ₹${inr.format(LIC_PRICE.full).replace(".00","")} (first year included), then ₹${inr.format(LIC_PRICE.renew).replace(".00","")} a year.${btn("Activate licence")}</div>`;
+  if(L.state==="expiring")return `<div class="banner lic">Licence renewal due on <b>${fmtDate(L.p.e)}</b> (${L.daysLeft} day${L.daysLeft===1?"":"s"}). Renewal ₹${inr.format(LIC_PRICE.renew).replace(".00","")} a year.${btn("Renew")}</div>`;
+  if(L.state==="grace")return `<div class="banner lic bad">Licence expired on <b>${fmtDate(L.p.e)}</b>. Renew within ${L.graceLeft} day${L.graceLeft===1?"":"s"} to keep billing.${btn("Renew now")}</div>`;
+  if(L.locked)return `<div class="banner lic bad"><b>${L.state==="locked"?"Free trial over":"Licence expired"}.</b> Ledgerbook is read-only: you can view, print, export and back up, but not add or change records.${btn(L.state==="locked"?"Activate licence":"Renew licence")}</div>`;
+  return "";
+}
+function licStatusHTML(){
+  const L=LIC,B=S.settings,big=(c,t,s)=>`<div class="licst ${c}"><b>${t}</b><span>${s}</span></div>`;
+  if(L.state==="active")return big("ok",`Licensed to ${esc(L.p.n)}`,`${L.trialKey?"Trial licence":"Full version"} · valid till ${fmtDate(L.p.e)} · ${esc(L.p.id||"")}`);
+  if(L.state==="expiring")return big("warn",`Licensed to ${esc(L.p.n)}`,`Renewal due ${fmtDate(L.p.e)} (${L.daysLeft} days) · ${esc(L.p.id||"")}`);
+  if(L.state==="grace")return big("bad","Licence expired",`Expired ${fmtDate(L.p.e)} · read-only in ${L.graceLeft} days`);
+  if(L.state==="expired")return big("bad","Licence expired",`Expired ${fmtDate(L.p.e)} · read-only`);
+  if(L.state==="trial")return big("warn","Free trial",`${L.daysLeft} days left (started ${fmtDate(B.installedOn||todayISO())})`);
+  if(L.state==="locked")return big("bad","Trial over","Read-only until a licence is activated");
+  return big("ok","Licence","Checking…");
+}
+function licRequestText(kind){const B=S.settings,L=LIC;return `Hello, I'd like to ${kind==="renew"?"renew my":"buy a"} Ledgerbook licence.\nBusiness: ${B.name||""}\nGSTIN: ${B.gstin||"Not registered"}\nCity: ${B.city||""}\nPhone: ${B.phone||""}${L.p?.id?`\nLicence: ${L.p.id} (valid till ${fmtDate(L.p.e)})`:""}`}
+function openLicenceModal(fromBlock){
+  const L=LIC,renew=!!L.p,B=S.settings;
+  openModal("Ledgerbook licence",`${fromBlock&&L.locked?`<div class="banner" style="background:var(--bad-soft);color:var(--bad)">This change can't be saved: ${L.state==="locked"?"the free trial is over":"the licence has expired"}. Your data is safe; activate a licence key to continue.</div>`:""}
+   ${licStatusHTML()}
+   <div class="licprice"><div><b>₹${inr.format(LIC_PRICE.full).replace(".00","")}</b><span>Full version, one time<br>includes the first year</span></div><div><b>₹${inr.format(LIC_PRICE.renew).replace(".00","")}</b><span>Yearly renewal<br>updates &amp; support</span></div><div><b>All features</b><span>Unlimited users &amp; devices<br>for your business</span></div></div>
+   <label class="f" style="margin-top:14px"><span>Licence key</span><textarea class="input mono" id="lic_key" rows="4" placeholder="Paste the key you received on WhatsApp (starts with LB2-)" style="font-size:12px">${esc(SRV?"":B.licence||"")}</textarea></label>
+   <p class="hint">The key is made for <b>${esc(B.name||"your business name")}</b>${B.gstin?` (GSTIN ${esc(B.gstin)})`:""}. Keep these the same in Settings.</p><div id="licErr"></div>`,
+   `<a class="btn wa" id="lic_req" target="_blank" rel="noopener" href="https://wa.me/${DEV_PHONE}?text=${encodeURIComponent(licRequestText(renew?"renew":"buy"))}" style="margin-right:auto">${renew?"Ask for renewal":"Ask for a licence"} on WhatsApp</a><button class="btn" data-close>Close</button><button class="btn pri" id="lic_go">${ic("check")} Activate</button>`,{narrow:false});
+  $("#lic_go").onclick=async()=>{const key=$("#lic_key").value.replace(/\s+/g,""),err=m=>$("#licErr").innerHTML=`<div class="err">${m}</div>`;
+    if(!key)return err("Paste the licence key first.");const p=await verifyLicKey(key);
+    if(!p)return err("This key isn't valid. Copy the whole key exactly as received, from LB2- to the end.");
+    if(p.nocrypto)return err("This device can't check keys. Update Android System WebView from the Play Store, then try again.");
+    if(!licMatches(p,S.settings)){$("#licErr").innerHTML=`<div class="err">This key is for <b>${esc(p.n)}</b>${p.g?` (GSTIN ${esc(p.g)})`:""}, but Settings say <b>${esc(S.settings.name||"—")}</b>${S.settings.gstin?` (${esc(S.settings.gstin)})`:""}.</div><button class="btn sm" id="lic_fix" style="margin-top:8px">Use the licensed name${p.g?" and GSTIN":""}</button>`;
+      $("#lic_fix").onclick=async()=>{const n={...S.settings,name:p.n};if(p.g){n.gstin=p.g;n.state=p.g.slice(0,2)}await guard(()=>backend.saveSettings(n));$("#lic_go").click()};return}
+    await guard(()=>backend.saveSettings({...S.settings,licence:key}));if(SRV)await refreshMe();await computeLic();LIC_SIG=licSigOf();closeModal();renderShell();renderView();
+    toast(`Licence activated: valid till ${fmtDate(p.e)}`)};
+}
+function licencePanel(){return `<div class="panel" style="max-width:860px;margin-bottom:16px"><div class="row" style="justify-content:space-between;align-items:center"><h2 style="margin:0">Licence</h2><button class="btn pri" data-act="licence">${LIC.p?"Renew / enter key":"Activate licence"}</button></div><div style="margin-top:12px">${licStatusHTML()}</div><p class="hint" style="margin-bottom:0">Full version ₹${inr.format(LIC_PRICE.full).replace(".00","")} one time (first year included), then ₹${inr.format(LIC_PRICE.renew).replace(".00","")} a year for updates and support. ${LIC.p?`The licence is tied to this business name${LIC.p.g?" and GSTIN":""}; changing ${LIC.p.g?"the GSTIN":"the name"} needs a new key. `:""}Developed by ${DEVELOPER}.</p></div>`}
+function licWrap(b){
+  const blk=()=>{if(LIC.locked&&!SRV){const e=new Error("Licence expired");e.code="licence";clearTimeout(licWrap._t);licWrap._t=setTimeout(()=>openLicenceModal(true),0);throw e}};
+  return Object.assign(Object.create(null),b,{put:async(c,o)=>{blk();return b.put(c,o)},remove:async(c,id)=>{blk();return b.remove(c,id)},nextSeq:async(...a)=>{blk();return b.nextSeq(...a)}});
+}
+
 /* ---------- Settings ---------- */
 function vSettings(){
   const B=S.settings,hasSample=COLLS.some(c=>S[c].some(x=>x.sample));
   return `<div class="head"><div><h1>Settings</h1><div class="sub">Your business details print on every invoice. Your state decides CGST+SGST vs IGST.</div></div></div>
-  <div class="panel" style="max-width:860px"><div class="grid g2">
+  ${licencePanel()}<div class="panel" style="max-width:860px"><div class="grid g2">
    <label class="f req"><span>Business name</span><input class="input" id="st_name" value="${esc(B.name)}"></label>
    <label class="f"><span>GSTIN</span><input class="input" id="st_gstin" maxlength="15" style="text-transform:uppercase;font-family:var(--f-mono)" value="${esc(B.gstin)}"></label>
    <label class="f req spanall"><span>Address</span><input class="input" id="st_addr" value="${esc(B.address)}"></label>
@@ -3457,6 +3534,7 @@ $("#main").addEventListener("click",async e=>{
   if(a==="saveBudgets"){const b={...(S.settings.budgets||{})};$("#main").querySelectorAll("[data-bud]").forEach(i=>{if(i.value==="")delete b[i.dataset.bud];else b[i.dataset.bud]=num(i.value)});await guard(()=>backend.saveSettings({...S.settings,budgets:b}));toast("Budgets saved");return}
   if(a==="saveMore")return saveMore();
   if(a==="coAdd"){const nm=$("#co_name").value.trim();if(!nm){toast("Enter the company name");return}const cur=companyId();let list=companies();if(!list.some(c=>c.id===cur))list.unshift({id:cur,name:""});list=list.map(c=>c.id===cur?{...c,name:S.settings.name||c.name}:c);const id="co"+uid();list.push({id,name:nm});saveCompanies(list);switchCompany(id);return}
+  if(a==="licence")return openLicenceModal();
   if(a==="hideSetup"){try{localStorage.setItem("lb_hideSetup","1")}catch(e){}return renderView()}
   if(a==="gstr1json"||a==="gstr1jsonThis")return downloadGstr1Json(t.dataset.f,t.dataset.t);
   if(a==="ewbBulk"){const list=S.sales.filter(inRange).filter(x=>ewbNeeded(x)&&!x.ewb?.no);return downloadEwbJson(list)}
@@ -3493,7 +3571,7 @@ window.__onBack=()=>{if($("#modalRoot").firstChild){closeModal();return true}if(
   if(cfg&&cfg.url){
     SRV=cfg;
     if(!cfg.token){let setup=false;try{setup=(await api("/api/health",{url:cfg.url,token:null})).setup}catch(e){}return showGate({url:cfg.url,setup})}
-    try{const me=await api("/api/me");ME=me.user;RIGHTS_DEF=me.rights;ROLES_DEF=me.roles;backend=serverBackend();await backend.init()}
+    try{const me=await api("/api/me");ME=me.user;SRV_LIC=me.licence||null;RIGHTS_DEF=me.rights;ROLES_DEF=me.roles;backend=serverBackend();await backend.init()}
     catch(e){if(e.code==="auth")return;return showGate({url:cfg.url,msg:e.message})}
     setConn(true);
   }else{
@@ -3502,11 +3580,13 @@ window.__onBack=()=>{if($("#modalRoot").firstChild){closeModal();return true}if(
       try{db=await window.claude.use("db")}catch(e){db=null}
       try{downloadsNS=await window.claude.use("downloads")}catch(e){}
     }
-    if(db){backend=dbBackend(db);$("#storeDot").className="dot ok";$("#storeText").textContent="Saved to this page's storage · synced"}
-    else{backend=await localBackend();$("#storeDot").className="dot "+(NATIVE?"ok":"local");$("#storeText").textContent=NATIVE?`Saved on this ${DEVICE}`:"Saved in this browser only";}
+    if(db){backend=licWrap(dbBackend(db));$("#storeDot").className="dot ok";$("#storeText").textContent="Saved to this page's storage · synced"}
+    else{backend=licWrap(await localBackend());$("#storeDot").className="dot "+(NATIVE?"ok":"local");$("#storeText").textContent=NATIVE?`Saved on this ${DEVICE}`:"Saved in this browser only";}
     if(DESKTOP&&NATIVE.serverInfo){try{const i=await NATIVE.serverInfo();if(i.running){/* hosting but not signed in: nudge from Settings */}}catch(e){}}
   }
   if(NATIVE)setTimeout(()=>loadPdfLib().catch(()=>{}),1500);
+  if(!SRV&&!S.settings.installedOn)await backend.saveSettings({...S.settings,installedOn:todayISO()}).catch(()=>{});
+  await computeLic();LIC_SIG=licSigOf();
   if(backend?.kind==="local"){const cur=companyId();let cs=companies();if(!cs.some(c=>c.id===cur))cs.push({id:cur,name:""});const me=cs.find(c=>c.id===cur);if(me.name&&!S.settings.name)await backend.saveSettings({...S.settings,name:me.name}).catch(()=>{});saveCompanies(cs.map(c=>c.id===cur?{...c,name:S.settings.name||c.name}:c))}
   READY=true;renderShell();renderView();startI18n();
 })();

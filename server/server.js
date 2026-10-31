@@ -14,7 +14,7 @@ const path = require("path");
 const crypto = require("crypto");
 const os = require("os");
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 const COLLS = ["items", "customers", "vendors", "purchases", "sales", "tds", "ledgers", "vouchers", "creditNotes", "debitNotes", "quotes", "salesOrders", "challans", "purchaseOrders", "recurring", "transfers", "productions", "bankStmt", "reco", "gstr2b", "employees", "payruns"];
 const RIGHTS = [
   ["sales.view", "Sales: view invoices"], ["sales.create", "Sales: create invoices"], ["sales.payment", "Sales: collect payments"],
@@ -37,6 +37,22 @@ const ROLES = {
 };
 const PAY_FIELDS = new Set(["payMode", "payStatus", "payRef", "payment", "paidAt", "cashGiven", "cashChange", "waSentAt"]);
 const META = new Set(["_rev", "_at", "_by"]);
+
+/* ---------- licence (same rules as the app): full version, trial 15 days, 15 days' grace after expiry ---------- */
+const LIC_PUB = crypto.createPublicKey({ key: {"kty":"EC","x":"OPhCbkfugkLwg1q9wQyKtAi7b7IxfroxqtHJcgecxDk","y":"pm9Qq3vS3egEwwSyb8H677aqzXlkbFr6sPeEzbyP-9o","crv":"P-256"}, format: "jwk" });
+const TRIAL_DAYS = 15, GRACE_DAYS = 15;
+const isoLocal = (d = new Date()) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const dayDiff = (a, b) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 864e5);
+function verifyLic(key) {
+  const m = String(key || "").replace(/\s+/g, "").match(/^LB2-([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/);
+  if (!m) return null;
+  try {
+    const ok = crypto.verify("sha256", Buffer.from(m[1]), { key: LIC_PUB, dsaEncoding: "ieee-p1363" }, Buffer.from(m[2], "base64url"));
+    if (!ok) return null;
+    const p = JSON.parse(Buffer.from(m[1], "base64url").toString("utf8"));
+    return p && p.e && p.n ? p : null;
+  } catch (e) { return null; }
+}
 
 function createLedgerbookServer(opts = {}) {
   const dataDir = opts.dataDir || path.join(process.cwd(), "ledgerbook-data");
@@ -161,6 +177,21 @@ function createLedgerbookServer(opts = {}) {
   setInterval(() => { for (const c of clients) { try { c.res.write(": ping\n\n"); } catch (e) { /* closed */ } } }, 25000).unref();
   const canReadColl = (u, c) => (["ledgers", "vouchers", "bankStmt", "reco", "employees", "payruns"].includes(c) ? has(u, "accounts.view") || has(u, "accounts.edit") : true);
 
+  /* ---------- licence status ---------- */
+  function licStatus() {
+    const S = db.settings || {}, t = isoLocal(), p = S.licence ? verifyLic(S.licence) : null;
+    const nn = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const match = p && (p.g ? String(S.gstin || "").toUpperCase() === String(p.g).toUpperCase() : nn(S.name) === nn(p.n));
+    if (p && match) {
+      const d = dayDiff(t, p.e), st = d >= 0 ? (d <= 30 ? "expiring" : "active") : (-d <= GRACE_DAYS ? "grace" : "expired");
+      return { state: st, p, daysLeft: d, graceLeft: GRACE_DAYS + d, locked: st === "expired", trialKey: p.t === "trial" };
+    }
+    const firstUser = Object.values(db.users).filter((u) => u.createdAt).map((u) => isoLocal(new Date(u.createdAt))).sort()[0];
+    const inst = S.installedOn || firstUser || t, left = TRIAL_DAYS - dayDiff(inst, t);
+    return { state: left >= 0 ? "trial" : "locked", daysLeft: left, mismatch: p && !match ? p : null, locked: left < 0 };
+  }
+  const licBlocked = (res) => { if (!licStatus().locked) return false; send(res, 402, { error: "The Ledgerbook licence has expired, so records can't be changed. Ask the admin to renew the licence (Settings → Licence).", code: "licence" }); return true; };
+
   /* ---------- rights per write ---------- */
   function rightFor(c, before, after) {
     switch (c) {
@@ -248,7 +279,8 @@ function createLedgerbookServer(opts = {}) {
       if (!auth) return send(res, 401, { error: "Please sign in again." });
       const me = auth.user;
 
-      if (p === "/api/me") return send(res, 200, { user: pub(me), rights: RIGHTS, roles: ROLES, version: VERSION });
+      if (p === "/api/me") return send(res, 200, { user: pub(me), rights: RIGHTS, roles: ROLES, version: VERSION, licence: licStatus() });
+      if (p === "/api/licence") return send(res, 200, licStatus());
       if (p === "/api/logout" && req.method === "POST") { delete sessions[auth.key]; saveSessions(); audit({ user: who(me), ip: ipOf(req), device: devOf(req), action: "logout", coll: "users" }); return send(res, 200, { ok: true }); }
       if (p === "/api/password" && req.method === "POST") {
         const b = await readBody(req);
@@ -277,6 +309,7 @@ function createLedgerbookServer(opts = {}) {
         const c = m[1], id = decodeURIComponent(m[2]);
         if (!COLLS.includes(c)) return send(res, 404, { error: "Unknown record type." });
         const before = db.colls[c][id] || null;
+        if ((req.method === "PUT" || req.method === "DELETE") && licBlocked(res)) return;
         if (req.method === "PUT") {
           const b = await readBody(req), doc = Object.assign({}, b.doc || {}, { id });
           const need = rightFor(c, before, doc);
@@ -316,6 +349,7 @@ function createLedgerbookServer(opts = {}) {
         return send(res, 200, { doc: saved });
       }
       if (p === "/api/seq" && req.method === "POST") {
+        if (licBlocked(res)) return;
         if (!has(me, "sales.create")) return send(res, 403, { error: "You don't have permission to create invoices." });
         const b = await readBody(req), fy = String(b.fy || "").slice(0, 10);
         const n = Math.max(+db.counters[fy] || 0, +b.floor || 0) + 1;
@@ -332,6 +366,7 @@ function createLedgerbookServer(opts = {}) {
         return send(res, 200, { ok: true });
       }
       if (p === "/api/import" && req.method === "POST") {
+        if (licBlocked(res)) return;
         if (!has(me, "backup")) return send(res, 403, { error: "You don't have permission to import data." });
         const b = await readBody(req), d = b.data || {};
         const existing = COLLS.reduce((a, c) => a + Object.keys(db.colls[c]).length, 0);

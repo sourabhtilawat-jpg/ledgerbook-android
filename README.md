@@ -143,3 +143,9 @@ Also new: credit notes (sales returns), debit notes (purchase returns), quotatio
 | Cost centres & budgets | Profit by branch or project, and budget vs actual |
 
 Also new: stock count / adjustment, item ledger, GSTR-2B reconciliation, GSTR-9 working, composition scheme (bill of supply, CMP-08 and GSTR-4 working), cash flow statement, financial ratios, several companies on one device, and a "scan to pay" UPI QR printed on unpaid invoices.
+
+## Licence (v2.1)
+Ledgerbook is sold as a full version: ₹6,000 one time (first year included), then ₹1,500 a year.
+- New installs run a 15-day free trial. After the trial, or 15 days after a licence expires, Ledgerbook becomes read-only (view, print, export and backup still work) until a key is entered in **Settings → Licence**.
+- Keys are signed offline (ECDSA P-256) and tied to the business name, or to the GSTIN when one is given. A shared server checks the licence too and refuses changes when it has lapsed.
+- The developer creates keys and tracks renewals with the separate Licence Manager tool. The signing key file is never stored in this repository.
