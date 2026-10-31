@@ -134,7 +134,7 @@ tfoot td{font-weight:600;background:var(--sunk);border-top:1px solid var(--line)
 .chip.p-card{background:var(--blue-soft);color:var(--blue)} .chip.p-due{background:var(--amber-soft);color:var(--amber)}
 .empty{padding:30px;text-align:center;color:var(--muted)}
 .empty b{display:block;color:var(--ink);font-size:15px;margin-bottom:4px}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow-x:auto}
+.tabs{display:flex;flex-wrap:wrap;gap:2px 4px;border-bottom:1px solid var(--line);margin-bottom:14px}
 .tabs button{all:unset;cursor:pointer;padding:9px 12px;color:var(--muted);font-weight:500;border-bottom:2.5px solid transparent;white-space:nowrap}
 .tabs button[aria-selected="true"]{color:var(--accent);border-bottom-color:var(--accent)}
 .tabs button:focus-visible{outline:2px solid var(--accent)}
@@ -221,6 +221,12 @@ legend{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.0
 .arow .ib{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--sunk);color:var(--muted)}.arow .ib svg.ic{width:16px;height:16px}
 .arow .ib.warn{background:var(--warn-soft);color:var(--warn)}.arow .ib.bad{background:var(--bad-soft);color:var(--bad)}.arow .ib.b2b{background:var(--blue-soft);color:var(--blue)}.arow .ib.good{background:var(--good-soft);color:var(--good)}
 .more{display:grid;gap:8px;justify-items:start;background:linear-gradient(135deg,var(--accent-soft),var(--surface))}
+.fs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.fsb{all:unset;cursor:pointer;box-sizing:border-box;background:var(--surface);border:1.5px solid var(--line);border-radius:14px;padding:14px 16px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 12px;align-items:center;box-shadow:var(--shadow)}
+.fsb:hover,.fsb.on{border-color:var(--accent)}.fsb.on{background:color-mix(in srgb,var(--accent-soft) 60%,var(--surface))}.fsb:focus-visible{outline:2px solid var(--accent)}
+.fsb .ib{grid-row:span 2;width:42px;height:42px;border-radius:11px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent)}
+.fsb b{font-size:15px}.fsb small{color:var(--muted);font-size:12.5px;font-family:var(--f-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:1000px){.fs{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .feats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .feat{display:flex;gap:10px;align-items:flex-start;border:1.5px solid var(--line);border-radius:12px;padding:12px;cursor:pointer}
 .feat.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent-soft) 50%,transparent)}
@@ -276,7 +282,7 @@ const STATE_NAME=Object.fromEntries(STATES);
 const GST_RATES=[0,0.25,3,5,12,18,28,40];
 const UNITS=["PCS","NOS","BOX","BAG","KGS","GMS","LTR","MTR","SET","PAC","DOZ","BTL","ROL","SQM"];
 const COLLS=["items","customers","vendors","purchases","sales","tds","ledgers","vouchers","creditNotes","debitNotes","quotes","salesOrders","challans","purchaseOrders","recurring","transfers","productions","bankStmt","reco","gstr2b","employees","payruns"];
-const APP_VERSION="2.0";
+const APP_VERSION="2.0.1";
 const DEVELOPER="Sourabh Tilawat";
 /* TDS on resident payments under section 393(1), Income-tax Act 2025 (from 1 Apr 2026). Old 1961-Act section shown for familiarity.
    Rates per published FY 2026-27 rate charts; payment codes are left for the user because published code lists differ. */
@@ -1211,7 +1217,7 @@ function vReports(){
     sub._export=()=>[["SKU","Item","HSN","Unit","Opening","In","Out","Closing","Average cost","Stock value"],...rows.map(([i,s])=>[i.sku,i.name,i.hsn,i.unit,s.open,s.inQ,s.outQ,s.bal,r2(avgCost(i.id,t0)),r2(Math.max(0,s.bal)*avgCost(i.id,t0))])];sub._file=`stock-summary_${todayISO()}.csv`;
     body=`<p class="muted">Current position across all dates. For live stock with status, see <button class="link" data-go="inventory">Inventory</button>.</p><div class="row" style="justify-content:flex-end;margin-bottom:8px">${expBtns()}<button class="btn sm" data-act="exportReport">CSV</button></div><div class="tablewrap">${rows.length?`<table><thead><tr><th>SKU</th><th>Item</th><th class="num">Opening</th><th class="num">In</th><th class="num">Out</th><th class="num">Closing</th><th class="num">Value at cost</th></tr></thead><tbody>${rows.map(([i,s])=>`<tr><td class="mono">${esc(i.sku)}</td><td>${esc(i.name)}</td><td class="num">${qtyf(s.open)}</td><td class="num">${qtyf(s.inQ)}</td><td class="num">${qtyf(s.outQ)}</td><td class="num">${qtyf(s.bal)}</td><td class="num">${amt(Math.max(0,s.bal)*avgCost(i.id,t0))}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No items yet</b></div>`}</div>`;
   }
-  return `<div class="head"><div><h1>Reports</h1><div class="sub">Filter by date, review, and export CSV for your accountant or the GST offline tool.</div></div></div><div class="tabs" role="tablist">${T}</div>${body}`;
+  return `<div class="head"><div><h1>Reports</h1><div class="sub">Filter by date, review, and export CSV for your accountant or the GST offline tool.</div></div></div>${finStrip()}<div class="tabs" role="tablist">${T}</div>${body}`;
 }
 
 /* ---------- GSTR-3B summary ---------- */
@@ -1487,6 +1493,12 @@ function acctRange(){
    <div class="row" style="margin-left:auto">${expBtns()}</div></div>`;
 }
 const expBtns=()=>`<button class="btn sm" data-act="exportXlsx">${ic("sales")} Excel</button><button class="btn sm" data-act="exportPdf">${ic("sales")} PDF</button>`;
+function finStrip(active){
+  if(!viewAllowed("accounts"))return "";
+  let tb="",pl="",bs="",cf="";try{const t=todayISO(),bk=books(fyStart(t),t),pf=plFigures(bk),d=bsData(bk,pf);pl=`${pf.NP>=0?"Profit":"Loss"} ${money(Math.abs(pf.NP))}`;bs=`Total ${money(d.ta)}`;let dr=0;for(const l of bk.list)if(l.close>0)dr+=l.close;tb=`${Math.abs(d.tl-d.ta)<0.01?"Balanced ✓":"Check"} · FY to date`;cf="Cash & bank movement"}catch(e){}
+  const B=[["tb","Trial balance",tb,"accounts"],["pl","Profit & Loss",pl,"reports"],["bs","Balance sheet",bs,"rupee"],["cf","Cash flow",cf,"bank"]];
+  return `<div class="fs">${B.map(([k,l,v,i])=>`<button class="fsb${active===k?" on":""}" data-fin="${k}"><span class="ib">${ic(i)}</span><b>${l}</b><small>${esc(v)}</small></button>`).join("")}</div>`;
+}
 function vAccounts(){
   const tab=sub.atab||"ledgers";
   const tabs=[["ledgers","Ledgers"],["vouchers","Vouchers & expenses"],["daybook","Day book"],["statement","Ledger statement"],["tb","Trial balance"],["pl","Profit & Loss"],["bs","Balance sheet"],["cf","Cash flow"],["ratios","Ratios"],...(feat("costCentres")?[["cc","Cost centres"],["budget","Budgets"]]:[])];
@@ -1494,7 +1506,7 @@ function vAccounts(){
   try{body=({ledgers:aLedgers,vouchers:aVouchers,daybook:aDayBook,statement:aStatement,tb:aTB,pl:aPL,bs:aBS,cf:aCashFlow,ratios:aRatios,cc:aCostCentres,budget:aBudgets}[tab]||aLedgers)()}catch(e){console.error(e);body=`<div class="banner">Could not build this report: ${esc(e.message)}</div>`}
   return `<div class="head"><div><h1>Accounts</h1><div class="sub">Every sale, purchase, payment, TDS entry and voucher posts to the ledgers automatically, so the trial balance, P&amp;L and balance sheet always agree.</div></div>
    <div class="row"><button class="btn" data-act="newLedger">${ic("plus")} Ledger</button><button class="btn pri" data-act="newVoucher" data-vt="Expense">${ic("plus")} Expense / voucher</button></div></div>
-  <div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-atab="${k}" aria-selected="${tab===k}">${l}</button>`).join("")}</div>${body}`;
+  ${finStrip(tab)}<div class="tabs" role="tablist">${tabs.map(([k,l])=>`<button role="tab" data-atab="${k}" aria-selected="${tab===k}">${l}</button>`).join("")}</div>${body}`;
 }
 function aLedgers(){
   const t=todayISO(),bk=books(fyStart(t),t),q=(sub.lq||"").toLowerCase();
@@ -3174,13 +3186,14 @@ function vDash(){
     <div><h3>Recent invoices</h3><div class="tablewrap">${recent.length?`<table><tbody>${recent.map(s=>`<tr><td class="mono"><button class="link" data-view-sale="${s.id}">${esc(s.no)}</button><div class="hint">${fmtDate(s.date)}</div></td><td>${esc(s.party?.name)} ${typeChip(s)}${s.status==="cancelled"?' <span class="chip bad">Cancelled</span>':""}</td><td>${payChip(s)}</td><td class="num">${amt(docCalc(s).grand)}</td></tr>`).join("")}</tbody></table>`:`<div class="empty"><b>No invoices yet</b>Tap New invoice to bill your first customer.</div>`}</div></div></div>
    <div class="stack"><div><h3>Needs attention</h3><div class="panel att">${att.length?att.map(([c,icn,msg,a,btn])=>`<div class="arow"><span class="ib ${c}">${ic(icn)}</span><span>${msg}</span><button class="btn sm" ${a}>${btn}</button></div>`).join(""):`<div class="arow"><span class="ib good">${ic("check")}</span><span>All clear. Nothing needs you right now.</span></div>`}</div></div>
     <div><h3>Today's collection</h3><div class="panel" style="display:grid;gap:10px">${bar("UPI","UPI","p-upi")}${bar("Cash","Cash","p-cash")}${bar("Card","Card","p-card")}${bar("Due","Due","p-due")}</div></div>
+    ${viewAllowed("accounts")?`<div><h3>Financial statements</h3>${finStrip().replace('class="fs"','class="fs" style="grid-template-columns:repeat(2,minmax(0,1fr))"')}</div>`:""}
     ${FEATURES.filter(f=>!feat(f[0])).length>=6?`<div class="panel more"><b>Need more?</b><div class="hint">Turn on batches &amp; expiry, godowns, manufacturing, payroll, exports, price lists and more in Settings → Features.</div><button class="btn sm" data-go="settings">Choose features</button></div>`:""}</div>
   </div>`;
 }
 /* global search / command palette */
 function openSearch(){
   const pages=VIEWS.filter(v=>v[0]!=="sep"&&viewAllowed(v[0])&&navOk(v[0])).map(v=>({t:"Go to "+v[1],k:"page",v:v[0],icn:v[0]}));
-  const acts=[["newSale","New sales invoice","sales"],["newPurchase","New purchase","purchases"],["newQuote","New quotation","gst"],["newItem","Add item","items"],["newCustomer","Add customer","customers"],["newVendor","Add vendor","vendors"],["newExpense","Record expense","cash"],["stockCount","Stock count","inventory"],...(feat("orders")?[["newPO","New purchase order","vendors"],["newSO","New sales order","sales"],["newDC","New delivery challan","vendors"]]:[]),...(feat("barcode")?[["labels","Print barcode labels","scan"]]:[]),...(feat("payroll")?[["newPayrun","Run salary","payroll"]]:[])].map(([a,t,icn])=>({t,k:"act",a,icn}));
+  const acts=[["newSale","New sales invoice","sales"],["newPurchase","New purchase","purchases"],["newQuote","New quotation","gst"],["newItem","Add item","items"],["newCustomer","Add customer","customers"],["newVendor","Add vendor","vendors"],["newExpense","Record expense","cash"],["stockCount","Stock count","inventory"],...(feat("orders")?[["newPO","New purchase order","vendors"],["newSO","New sales order","sales"],["newDC","New delivery challan","vendors"]]:[]),...(feat("barcode")?[["labels","Print barcode labels","scan"]]:[]),...(feat("payroll")?[["newPayrun","Run salary","payroll"]]:[]),...(viewAllowed("accounts")?[["finpl","Profit & Loss account","reports"],["finbs","Balance sheet","rupee"],["fintb","Trial balance","accounts"],["fincf","Cash flow statement","bank"]]:[])].map(([a,t,icn])=>({t,k:"act",a,icn}));
   openModal("Search",`<input class="input" id="gs_q" placeholder="Invoice no, customer, item, mobile, or what you want to do…" autocomplete="off" style="font-size:16px;min-height:46px"><div id="gs_res" class="gsres"></div>`,"",{});
   let sel=0,res=[];
   const run=()=>{const q=$("#gs_q").value.trim().toLowerCase();const m=x=>x.toLowerCase().includes(q);res=[];
@@ -3201,7 +3214,7 @@ function openSearch(){
 }
 function doAct(a){const m={newSale:()=>openSaleForm(),newPurchase:()=>openPurchaseForm(),newQuote:()=>openSaleForm({quote:true}),newSO:()=>openSaleForm({docKind:"so"}),newDC:()=>openSaleForm({docKind:"dc"}),newPO:()=>openPOForm(),newItem:()=>openItemForm(),newCustomer:()=>openPartyForm("customers"),newVendor:()=>openPartyForm("vendors"),
   newExpense:()=>openVoucherForm("Expense"),stockCount:()=>openStockCount(),labels:()=>openLabelsForm(),newPayrun:()=>{if(view!=="payroll")go("payroll");openPayrun()},newEmp:()=>openEmpForm(),
-  goCollect:()=>{go("reports",{tab:"outstanding"})},scanBill:()=>{openSaleForm();setTimeout(()=>$("#so_scan")&&$("#so_scan").click(),120)},search:()=>openSearch(),transfer:()=>openTransferForm(),production:()=>openProductionForm()}[a];if(m){m();return true}return false}
+  goCollect:()=>{go("reports",{tab:"outstanding"})},scanBill:()=>{openSaleForm();setTimeout(()=>$("#so_scan")&&$("#so_scan").click(),120)},search:()=>openSearch(),finpl:()=>go("accounts",{atab:"pl"}),finbs:()=>go("accounts",{atab:"bs"}),fintb:()=>go("accounts",{atab:"tb"}),fincf:()=>go("accounts",{atab:"cf"}),transfer:()=>openTransferForm(),production:()=>openProductionForm()}[a];if(m){m();return true}return false}
 const navOk=v=>v==="payroll"?feat("payroll"):v==="banking"?feat("bank"):true;
 
 /* settings: features, godowns, price lists, cost centres, tax scheme, language */
@@ -3388,6 +3401,7 @@ $("#main").addEventListener("click",async e=>{
   if(t.dataset.os){sub.os=t.dataset.os;return renderView()}
   if(t.dataset.go3b){go("reports");sub.tab="gstr3b";const [a,b]=monthRange(-1);sub.from=a;sub.to=b;return renderView()}
   if(t.dataset.goewb){go("reports");sub.tab="ewb";return renderView()}
+  if(t.dataset.fin){const k=t.dataset.fin;go("accounts",{atab:k});return}
   if(t.dataset.newdoc)return openSaleForm({docKind:t.dataset.newdoc});
   if(t.dataset.sdoc){const [k,id]=t.dataset.sdoc.split(":");return viewSDoc(k,id)}
   if(t.dataset.recurRun){const r=byId("recurring",t.dataset.recurRun);if(r)runRecurring(r,false);return}

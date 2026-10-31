@@ -1,7 +1,7 @@
 {
   "name": "ledgerbook",
   "productName": "Ledgerbook",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "GST billing, inventory and returns for small businesses",
   "author": "Sourabh Tilawat",
   "license": "UNLICENSED",
