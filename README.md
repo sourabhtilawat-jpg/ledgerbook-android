@@ -149,3 +149,9 @@ Ledgerbook is sold as a full version: ₹6,000 one time (first year included), t
 - New installs run a 15-day free trial. After the trial, or 15 days after a licence expires, Ledgerbook becomes read-only (view, print, export and backup still work) until a key is entered in **Settings → Licence**.
 - Keys are signed offline (ECDSA P-256) and tied to the business name, or to the GSTIN when one is given. A shared server checks the licence too and refuses changes when it has lapsed.
 - The developer creates keys and tracks renewals with the separate Licence Manager tool. The signing key file is never stored in this repository.
+
+## Support this project
+
+If you enjoy this app, you can support its development through
+[GitHub Sponsors](https://github.com/sponsors/sourabhtilawat-jpg). Every contribution helps me keep
+building and updating it. Thank you!
